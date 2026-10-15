@@ -1,30 +1,32 @@
 #!/usr/bin/env python3
-"""video-intel launcher: one entry point for every platform.
+"""VOID OSINT extractor: one entry point for every tool, on every platform.
 
-    python run.py                 set up, then show status
-    python run.py doctor          environment report for this device
-    python run.py setup           create the virtual environment and install dependencies
-    python run.py test [args]     run the test suite (offline by default)
-    python run.py lint            ruff + mypy
-    python run.py init            create the project layout and state database
-    python run.py analyze URL     run the CLI
-    python run.py web [--port N]  start the local web frontend
-    python run.py notebooklm ...  export or import a NotebookLM packet
-    python run.py <anything else> forwarded to the video-intel CLI
-    python run.py help            this list
+    python run.py                     set up, then list the tools
+    python run.py setup               create the shared venv and install every tool
+    python run.py doctor              per-tool environment report
+    python run.py test [args]         run every tool's test suite
+    python run.py lint                ruff + mypy over every tool
+    python run.py <tool> <command>    run a tool's CLI, e.g.
+                                      python run.py video-intel analyze "URL" -m quick
+    python run.py web [--port 8765]   start a tool's web frontend
+    python run.py help                this list
 
-Why a Python launcher rather than more shell
--------------------------------------------
+Why this is Python rather than more shell
+-----------------------------------------
 
-``run.sh`` covered Linux and macOS and nothing else: it needed bash, assumed
-``.venv/bin/python``, used ``python3`` and ``curl`` by name, and wrote to ``/tmp``. This
-file does the same job with the standard library only, so the identical commands work on
-Windows, macOS and Linux, and it picks the correct virtual-environment layout for the
-host. ``run.sh`` is now a thin wrapper around this file, so the two cannot drift apart.
+A shell script covers Linux and macOS and nothing else: it needs bash, assumes
+``.venv/bin/python``, and depends on ``python3`` and ``curl`` by name. This file uses the
+standard library only, so the identical commands work on Windows, macOS and Linux and
+the correct virtual-environment layout is picked for the host. ``run.sh`` is a thin
+wrapper around this file, so the two cannot drift apart.
 
-The launcher invokes the CLI as ``python -m video_intel`` rather than through the
-generated ``video-intel`` console script: console scripts are per-platform, are not
-regenerated when dependencies change, and on Windows add another layer that can be stale.
+How tools are found
+--------------------
+
+Every directory under ``tools/`` containing a ``pyproject.toml`` is a tool. The launcher
+reads each one to learn its name and console scripts, so adding a tool needs no change
+here at all. All tools share the single virtual environment in ``.venv`` at the root, so
+they cannot pin conflicting versions of the same library.
 """
 
 from __future__ import annotations
@@ -36,12 +38,13 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-VENV_DIR = PROJECT_ROOT / ".venv"
-SRC_DIR = PROJECT_ROOT / "src"
+REPO_ROOT = Path(__file__).resolve().parent
+TOOLS_DIR = REPO_ROOT / "tools"
+VENV_DIR = REPO_ROOT / ".venv"
 DEFAULT_PORT = 8765
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:0.5b")
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -55,34 +58,104 @@ def _colour(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
+def _emit(message: str) -> None:
+    """Print a line, flushed.
+
+    Subprocesses write straight to the file descriptor, so a buffered print would
+    reorder output around their lines and make the launcher's progress look jumbled.
+    """
+    print(message, flush=True)
+
+
 def ok(message: str) -> None:
-    print(_colour("32", "✓") + f" {message}")
+    _emit(_colour("32", "✓") + f" {message}")
 
 
 def warn(message: str) -> None:
-    print(_colour("33", "!") + f" {message}")
+    _emit(_colour("33", "!") + f" {message}")
 
 
 def fail(message: str) -> None:
-    print(_colour("31", "✗") + f" {message}", file=sys.stderr)
+    print(_colour("31", "✗") + f" {message}", file=sys.stderr, flush=True)
     raise SystemExit(1)
 
 
 def info(message: str) -> None:
-    print(_colour("2", message))
+    _emit(_colour("2", message))
+
+
+# ------------------------------------------------------------------ tool discovery
+
+
+@dataclass
+class Tool:
+    """One installable tool under ``tools/``."""
+
+    name: str
+    root: Path
+    scripts: list[str] = field(default_factory=list)
+    description: str = ""
+
+    @property
+    def source_dir(self) -> Path:
+        return self.root / "src"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+def _parse_pyproject(path: Path) -> dict[str, Any] | None:
+    try:
+        import tomllib
+
+        return tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, Exception):
+        return None
+
+
+def discover_tools() -> list[Tool]:
+    """Every tool in ``tools/``, in directory order."""
+    if not TOOLS_DIR.is_dir():
+        return []
+    found: list[Tool] = []
+    for entry in sorted(TOOLS_DIR.iterdir()):
+        pyproject = entry / "pyproject.toml"
+        if not entry.is_dir() or not pyproject.is_file():
+            continue
+        data = _parse_pyproject(pyproject)
+        project = (data or {}).get("project", {})
+        name = project.get("name") or entry.name
+        scripts = sorted(project.get("scripts", {}) or {})
+        found.append(
+            Tool(
+                name=name,
+                root=entry,
+                scripts=scripts,
+                description=str(project.get("description", "")),
+            )
+        )
+    return found
+
+
+def find_tool(name: str) -> Tool | None:
+    for tool in discover_tools():
+        if tool.name == name or tool.root.name == name:
+            return tool
+    return None
+
+
+# ------------------------------------------------------------------ virtual environment
 
 
 def venv_python() -> Path:
-    """The interpreter inside the project virtual environment.
+    """The shared interpreter: ``Scripts`` on Windows, ``bin`` elsewhere.
 
-    ``Scripts`` on Windows, ``bin`` everywhere else. Probed rather than assumed so the
-    same source tree works after being copied from a Mac to a PC.
+    Probed rather than assumed, so the same checkout works after being copied from a Mac
+    to a PC.
     """
     if os.name == "nt":
-        candidate = VENV_DIR / "Scripts" / "python.exe"
-    else:
-        candidate = VENV_DIR / "bin" / "python"
-    return candidate
+        return VENV_DIR / "Scripts" / "python.exe"
+    return VENV_DIR / "bin" / "python"
 
 
 def base_python() -> str:
@@ -95,76 +168,100 @@ def base_python() -> str:
 
 
 def ensure_installed() -> Path:
-    """Return the virtual environment interpreter, creating it when necessary."""
+    """Return the shared interpreter, setting the workspace up when necessary."""
     python = venv_python()
     if not python.exists():
         setup(create_env=True)
     return python
 
 
-def _importable() -> None:
-    """Put the source tree on ``sys.path`` so the launcher works before installation.
-
-    ``doctor`` and ``checkpoint`` need the package, and the point of ``doctor`` is to
-    report on a machine that may not be installed correctly yet - so it must not depend
-    on the installation it is diagnosing.
-    """
-    source = str(SRC_DIR)
-    if source not in sys.path:
-        sys.path.insert(0, source)
-
-
 def setup(*, create_env: bool = True) -> Path:
-    """Create the virtual environment if needed and install the project."""
+    """Create the shared virtual environment and install every tool, editable.
+
+    ``uv sync`` is used when available because it understands the workspace and installs
+    every member in one resolution. The pip fallback does the same thing by hand.
+    """
     python = venv_python()
+    tools = discover_tools()
     if not python.exists():
         if not create_env:
             fail(f"no virtual environment at {VENV_DIR}; run: python run.py setup")
-        info("creating the virtual environment…")
+        info("creating the shared virtual environment…")
         subprocess.run([base_python(), "-m", "venv", str(VENV_DIR)], check=True)
         python = venv_python()
 
     uv = shutil.which("uv")
     if uv:
-        subprocess.run([uv, "pip", "install", "--python", str(python), "-e", ".[dev]"], check=True)
+        # --all-packages installs every workspace member (that is, every tool);
+        # without it uv only syncs the root, which ships no code of its own.
+        # --all-groups brings in the shared dev tooling.
+        subprocess.run(
+            [uv, "sync", "--all-packages", "--all-groups"],
+            cwd=str(REPO_ROOT),
+            check=True,
+        )
     else:
         subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-        subprocess.run([str(python), "-m", "pip", "install", "-e", ".[dev]"], check=True)
+        for tool in tools:
+            subprocess.run([str(python), "-m", "pip", "install", "-e", str(tool.root)], check=True)
+        subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "pytest>=8.0",
+                "pytest-asyncio>=0.23",
+                "anyio>=4.0",
+                "mypy>=1.10",
+                "ruff>=0.5",
+            ],
+            check=True,
+        )
 
     ok(f"environment ready: {python}")
+    for tool in tools:
+        ok(f"installed {tool.name}")
     return python
 
 
-def run_cli(python: Path, args: list[str], *, capture: bool = False) -> int:
-    """Invoke the CLI as a module, with the source tree importable as a fallback."""
-    env = dict(os.environ)
-    env.setdefault("PYTHONUNBUFFERED", "1")
-    existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = f"{SRC_DIR}{os.pathsep}{existing}" if existing else str(SRC_DIR)
-    result = subprocess.run(
-        [str(python), "-m", "video_intel", *args],
-        cwd=str(PROJECT_ROOT),
-        env=env,
-        check=False,
-        capture_output=capture,
-        text=True,
-    )
-    if capture:
-        sys.stdout.write(result.stdout or "")
-        sys.stderr.write(result.stderr or "")
-    return result.returncode
-
-
 def run_tool(python: Path, tool: str, args: list[str]) -> int:
-    """Run a development tool from the virtual environment.
+    """Run a development tool from the shared environment.
 
-    Invoked as ``python -m <tool>`` on every platform. The console-script layout differs
-    between ``bin`` and ``Scripts``, and a stale entry point is a confusing failure mode,
-    so the module form is the only one used here.
+    Invoked as ``python -m <tool>`` on every platform: the console-script layout differs
+    between ``bin`` and ``Scripts``, and a stale entry point is a confusing failure mode.
     """
     return subprocess.run(
-        [str(python), "-m", tool, *args], cwd=str(PROJECT_ROOT), check=False
+        [str(python), "-m", tool, *args], cwd=str(REPO_ROOT), check=False
     ).returncode
+
+
+def run_cli(python: Path, package: str, args: list[str]) -> int:
+    """Invoke a tool's CLI as a module.
+
+    ``python -m video_intel`` rather than the generated console script, which is
+    per-platform and is not regenerated when dependencies change.
+    """
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    sources = (
+        [str(entry / "src") for entry in sorted(TOOLS_DIR.iterdir()) if (entry / "src").is_dir()]
+        if TOOLS_DIR.is_dir()
+        else []
+    )
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        os.pathsep.join([*sources, existing]) if existing else os.pathsep.join(sources)
+    )
+    return subprocess.run(
+        [str(python), "-m", package, *args],
+        cwd=str(REPO_ROOT),
+        env=env,
+        check=False,
+    ).returncode
+
+
+# -------------------------------------------------------------------------- reporting
 
 
 def ollama_models() -> list[str] | None:
@@ -172,91 +269,92 @@ def ollama_models() -> list[str] | None:
     try:
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3) as response:
             payload: Any = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    except (urllib.error.URLError, OSError, ValueError):
         return None
     return [str(entry.get("name", "")) for entry in payload.get("models", [])]
 
 
-def doctor(python: Path) -> None:
-    """Report what this device can actually do."""
-    print("video-intel doctor")
+def workspace_report() -> None:
+    """Everything about this checkout that a user might need to know."""
+    print("VOID OSINT extractor")
     print("─" * 46)
-
     print(f"platform       {sys.platform}")
-    print(f"python         {sys.version.split()[0]}  ({sys.executable})")
-    print(f"project root   {PROJECT_ROOT}")
-    print(f"venv           {python} " + ("" if venv_python().exists() else "(not created yet)"))
+    print(f"python         {sys.version.split()[0]}")
+    print(f"workspace root {REPO_ROOT}")
+    print(
+        f"shared venv    {venv_python()} " + ("" if venv_python().exists() else "(not created yet)")
+    )
     print(f"uv             {shutil.which('uv') or 'not installed (optional)'}")
+    print()
 
-    _importable()
-    from video_intel.config.loader import load_config
-    from video_intel.storage.db import db_diagnostics
-    from video_intel.storage.paths import ProjectPaths, project_id_for
+    tools = discover_tools()
+    if not tools:
+        warn("no tools found under tools/")
+    for tool in tools:
+        commands = ", ".join(tool.scripts) or "none"
+        print(f"  {tool.name:<16} {commands}")
+        if tool.description:
+            print(_colour("2", f"  {'':<16} {tool.description[:66]}"))
+    print()
 
-    config = load_config()
-    data_dir = config.data_dir
-    paths = ProjectPaths(data_dir, project_id_for(config.project_name))
+    for path in (REPO_ROOT / ".env",):
+        if path.is_file():
+            ok(".env present (keys are read from it; values are never printed)")
+        else:
+            info("no .env — copy .env.example to .env to use a cloud provider")
 
-    print(f"project        {config.project_name}")
-    print(f"data dir       {data_dir}")
-    print(f"config files   {', '.join(Path(s).name for s in config.source_files)}")
-
-    state = db_diagnostics(paths.database)
-    if not state["exists"]:
-        info("no state database yet: python run.py init")
-    else:
-        print(
-            f"state db       {state['size_bytes']:,} bytes, "
-            f"schema v{state['schema_version']}, journal {state['journal_mode']}"
-        )
-        if state["sidecars"]:
-            warn(
-                f"uncheckpointed WAL sidecars present ({', '.join(state['sidecars'])}); "
-                "copy data/ only when no run is active, or run 'checkpoint' first"
-            )
-        if state["error"]:
-            warn(f"state database: {state['error']}")
-
-    videos = len(paths.videos())
-    if videos:
-        ok(f"data directory ready — {videos} stored video(s)")
-
-    if (PROJECT_ROOT / ".env").is_file():
-        ok(".env present (keys are read from it; values are never printed)")
-    else:
-        info("no .env — copy .env.example to .env to use a cloud provider")
-
-    ollama_binary = shutil.which("ollama")
     models = ollama_models()
     if models is None:
         warn(f"ollama server not reachable at {OLLAMA_URL} (local inference unavailable)")
     else:
         shown = ", ".join(models[:6]) or "no models pulled"
         ok(f"ollama server reachable — models: {shown}")
-        if not ollama_binary:
-            info("ollama CLI not on PATH; the server is still usable over HTTP")
-        elif not any(name.split(":")[0] == DEFAULT_MODEL.split(":")[0] for name in models):
+        if not any(name.split(":")[0] == DEFAULT_MODEL.split(":")[0] for name in models):
             warn(f"model '{DEFAULT_MODEL}' is not pulled yet: ollama pull {DEFAULT_MODEL}")
 
     for variable in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY"):
         if os.environ.get(variable):
             ok(f"{variable} is set in the environment")
-
     print("─" * 46)
 
 
-def checkpoint(python: Path) -> int:
-    """Fold the write-ahead log into ``state.db`` so the file can be copied alone."""
-    _importable()
-    from video_intel.config.loader import load_config
-    from video_intel.storage.db import StateStore
-    from video_intel.storage.paths import ProjectPaths, project_id_for
+def doctor(python: Path) -> int:
+    """Report the workspace, then ask each tool what it can do."""
+    workspace_report()
+    status = 0
+    for tool in discover_tools():
+        print()
+        info(f"── {tool.name} " + "─" * max(1, 40 - len(tool.name)))
+        status = run_cli(python, tool.name.replace("-", "_"), ["doctor"]) or status
+    return status
 
-    config = load_config()
-    store = StateStore(ProjectPaths(config.data_dir, project_id_for(config.project_name)).database)
-    store.checkpoint()
-    ok(f"checkpointed {store.path}")
-    return 0
+
+def test_all(python: Path, args: list[str]) -> int:
+    """Run every tool's suite in one pytest process."""
+    return run_tool(python, "pytest", args)
+
+
+def lint_all(python: Path, args: list[str]) -> int:
+    """Ruff over the workspace, then mypy over every installed package."""
+    code = run_tool(python, "ruff", ["check", "."])
+    code = run_tool(python, "ruff", ["format", "--check", "."]) or code
+
+    packages: list[str] = []
+    for tool in discover_tools():
+        if not tool.source_dir.is_dir():
+            continue
+        # Paths, not package names: a tool's package is only importable once its src/
+        # is installed, and mypy resolves these relative to the working directory.
+        packages.extend(
+            str(entry.relative_to(REPO_ROOT))
+            for entry in sorted(tool.source_dir.iterdir())
+            if entry.is_dir() and (entry / "__init__.py").is_file()
+        )
+    if packages:
+        code = run_tool(python, "mypy", [*packages, *args]) or code
+    else:
+        warn("no importable packages found; skipping mypy")
+    return code
 
 
 def start_ollama() -> int:
@@ -268,7 +366,7 @@ def start_ollama() -> int:
     if not binary:
         warn("ollama is not installed; skipping")
         return 0
-    log = Path(os.environ.get("TMPDIR") or os.environ.get("TEMP") or PROJECT_ROOT) / (
+    log = Path(os.environ.get("TMPDIR") or os.environ.get("TEMP") or REPO_ROOT) / (
         "video-intel-ollama.log"
     )
     info(f"starting ollama serve in the background (log: {log})…")
@@ -303,23 +401,22 @@ def start_ollama() -> int:
 def first_run(python: Path) -> int:
     setup()
     print()
-    doctor(python)
-    print()
-    if run_cli(python, ["init"]) != 0:
-        return 1
+    workspace_report()
     print()
     print(f"""{_colour("32", "Everything is set up.")}
 
-  start the web UI      python run.py web            → http://127.0.0.1:{DEFAULT_PORT}/
-  analyze a video       python run.py analyze "https://www.youtube.com/watch?v=VIDEO_ID"
-  quick run             python run.py analyze "URL" -m quick
-  local model           ollama serve && ollama pull {DEFAULT_MODEL}
-  use a cloud provider   put the key in .env, set execution_mode: hybrid in video-intel.yaml
+  see the tools        python run.py doctor
+  run a tool           python run.py <tool> --help
+  check everything     python run.py test && python run.py lint
 
-  this directory is now device-independent: copy it anywhere, or point
-  VIDEO_INTEL_DATA_DIR at a shared folder to use one library from several machines.
+  this checkout is device-independent: copy it anywhere and run `python run.py`.
+  each tool reads VIDEO_INTEL_* settings and the workspace data directory, so a
+  shared library can be pointed at from several machines with VIDEO_INTEL_DATA_DIR.
 """)
     return 0
+
+
+USAGE = __doc__
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -328,35 +425,29 @@ def main(argv: list[str] | None = None) -> int:
         return first_run(ensure_installed())
 
     command, rest = raw[0], raw[1:]
-    # Commands the launcher implements itself. Anything not listed here is forwarded
-    # verbatim to the video-intel CLI, with the subcommand included: `run.py init` must
-    # reach the CLI as `video-intel init`, not as a bare `video-intel`.
-    known = {
-        "setup",
-        "doctor",
-        "test",
-        "integration",
-        "lint",
-        "web",
-        "ollama",
-        "pull",
-        "checkpoint",
-        "shell",
-        "help",
-        "-h",
-        "--help",
-    }
 
     if command in {"help", "-h", "--help"}:
-        print(__doc__)
+        print(USAGE)
         return 0
 
-    # `setup` builds the environment itself; every other command needs one to exist
-    # first. Calling ensure_installed() unconditionally here would run setup twice on a
-    # first run, reinstalling the package for no reason.
+    # Commands the launcher implements itself. Anything else is a tool name, or a tool's
+    # own flags when no tool matches, in which case it is forwarded verbatim.
+    launcher_commands = {
+        "setup",
+        "doctor",
+        "status",
+        "test",
+        "lint",
+        "ollama",
+        "pull",
+        "shell",
+    }
+
     if command == "setup":
         setup()
         return 0
+    if command in {"doctor", "status"}:
+        return doctor(ensure_installed())
     if command == "ollama":
         return start_ollama()
     if command == "pull":
@@ -368,19 +459,10 @@ def main(argv: list[str] | None = None) -> int:
 
     python = ensure_installed()
 
-    if command == "doctor":
-        doctor(python)
-        return 0
     if command == "test":
-        return run_tool(python, "pytest", rest)
-    if command == "integration":
-        return run_tool(python, "pytest", ["-m", "integration", *rest])
+        return test_all(python, rest)
     if command == "lint":
-        code = run_tool(python, "ruff", ["check", "."])
-        code = run_tool(python, "ruff", ["format", "--check", "."]) or code
-        return run_tool(python, "mypy", rest) or code
-    if command == "checkpoint":
-        return checkpoint(python)
+        return lint_all(python, rest)
     if command == "shell":
         shell = os.environ.get("SHELL") or os.environ.get("COMSPEC")
         if shell and Path(shell).is_file():
@@ -388,27 +470,36 @@ def main(argv: list[str] | None = None) -> int:
                 subprocess.run([shell, "/K", "prompt"])
             else:
                 os.execv(shell, [shell])
-        return run_cli(python, ["--help"])
+        print(USAGE)
+        return 0
 
-    if command == "web":
-        port = DEFAULT_PORT
-        args: list[str] = []
-        index = 0
-        while index < len(rest):
-            if rest[index] == "--port" and index + 1 < len(rest):
-                port = int(rest[index + 1])
-                index += 2
-                continue
-            args.append(rest[index])
-            index += 1
-        print(f"{_colour('32', 'video-intel web UI')}: http://127.0.0.1:{port}/")
-        info("runs the same CLI under the hood; press Ctrl+C to stop")
-        return run_cli(python, ["web", "--port", str(port), *args])
+    tool = find_tool(command) if command not in launcher_commands else None
+    if tool is not None:
+        arguments = rest
+        if arguments and arguments[0] == "web":
+            arguments = _web_arguments(arguments)
+        return run_cli(python, tool.name.replace("-", "_"), arguments)
 
-    # Everything else is the CLI itself.
-    if command not in known:
-        rest = raw
-    return run_cli(python, rest)
+    if command in launcher_commands:
+        print(USAGE)
+        return 2
+
+    fail(f"unknown command or tool: {command!r} (try: python run.py help)")
+
+
+def _web_arguments(arguments: list[str]) -> list[str]:
+    """Print the URL for a web command, then pass the flags through unchanged."""
+    port = DEFAULT_PORT
+    index = 1
+    while index < len(arguments):
+        if arguments[index] == "--port" and index + 1 < len(arguments):
+            port = int(arguments[index + 1])
+            index += 2
+            continue
+        index += 1
+    print(f"{_colour('32', 'web UI')}: http://127.0.0.1:{port}/")
+    info("runs the same CLI under the hood; press Ctrl+C to stop")
+    return arguments
 
 
 if __name__ == "__main__":

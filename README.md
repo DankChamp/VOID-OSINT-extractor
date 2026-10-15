@@ -1,45 +1,24 @@
-# video-intel
+# VOID OSINT extractor
 
-Transcript-first, multi-AI knowledge extraction for YouTube videos.
+A workspace of OSINT extraction tools. One shared environment, one launcher, one data
+directory — and one tool added at a time without disturbing the others.
 
-A video URL in; a versioned, source-grounded knowledge dataset out. The transcript is
-the source of truth — models are processing tools, never the authority on what the
-speaker said.
+| Tool | What it does |
+| --- | --- |
+| [`video-intel`](tools/video-intel/) | Transcript-first, multi-AI knowledge extraction for YouTube videos |
 
-Full specification: [`project.md`](project.md).
-Implementation status: [phase 1](docs/phase-1-status.md), [phase 2](docs/phase-2-status.md),
-[phases 3-9](docs/phases-3-9-status.md).
-
-## Status
-
-Phases 1-9 of the specification are implemented: the pipeline runs end to end from a
-YouTube URL to a versioned knowledge dataset and its outputs.
-
-```text
-URL -> metadata -> transcript -> normalization -> chunks -> extraction (8 pipelines)
-    -> consolidation -> verification -> conflicts -> dataset -> notes / summary / ppt / json
-```
-
-What is real today, and what is not:
-
-- Real: transcript ingestion, chunking, provider calls, schema validation, deterministic
-  verification, deduplication, conflict detection, dataset assembly, all four outputs,
-  caching, resume.
-- Manual: NotebookLM is a file exchange (export a packet, import your JSON answer).
-- Not implemented: speech-to-text fallback, Gemini-specific adapter (the
-  OpenAI-compatible adapter covers it).
+The transcript is the source of truth in every tool that touches one: models are
+processing tools, never the authority on what a source actually said.
 
 ## Requirements
 
 - Python 3.11 or newer
-- Nothing else. The launcher creates the virtual environment and installs dependencies.
+- Nothing else. The launcher creates the environment and installs every tool.
 
 ## Setup
 
-The portable way — one command on every platform:
-
 ```bash
-python run.py            # create the environment, check it, initialize storage
+python run.py            # create the shared environment, install every tool, list them
 ```
 
 `python3 run.py` or `./run.sh` do the same thing on macOS and Linux. Windows, macOS and
@@ -49,192 +28,100 @@ Linux all take the identical path from here; `run.sh` is only a wrapper around `
 <summary>Manual setup</summary>
 
 ```bash
-uv venv && uv pip install -e ".[dev]"      # or: python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-cp .env.example .env                      # optional; only the providers you intend to use
+uv sync --all-groups                                    # recommended
+# or, without uv:
+python3 -m venv .venv && .venv/bin/pip install -e tools/video-intel
 ```
 
-On Windows the virtual environment lives in `.venv\Scripts\` rather than `.venv/bin/`.
-The console script (`video-intel`) is installed on every platform, and
-`python -m video_intel` always works.
+On Windows the environment lives in `.venv\Scripts\` rather than `.venv/bin/`.
 
 </details>
-
-Secrets are read from environment variables at call time. Nothing sensitive is stored
-in config files, project data or logs. `.env` is git-ignored and is never written by
-this project.
 
 ## Commands
 
 ```bash
-python run.py doctor                     # what this device can do: python, paths, db, ollama, keys
-python run.py test                       # unit tests: no network, no API keys, no model
-python run.py lint                       # ruff + mypy, strict
+python run.py                       set up, then list the tools
+python run.py setup                 create the shared venv and install every tool
+python run.py doctor                what this device can do, per tool
+python run.py test [args]           run every tool's test suite
+python run.py lint                  ruff + mypy over every tool
+python run.py <tool> <command>      run a tool's CLI
+python run.py help                  this list
 
-video-intel --version
-video-intel init                         # create project layout + state database
-video-intel providers                    # configured providers, key availability, adapter status
-video-intel pipelines                    # pipelines, modes and presets
-video-intel config show                  # effective configuration (secrets omitted)
-video-intel config validate              # validate merged configuration
-video-intel config path                  # where configuration is read from
-video-intel inspect VIDEO_ID             # stored artifacts and stage state
-
-# Analysis
-video-intel analyze "YOUTUBE_URL" --dry-run           # print the plan, fetch nothing
-video-intel analyze "YOUTUBE_URL"                     # the whole pipeline
-video-intel analyze "YOUTUBE_URL" -m quick           # fewer pipelines and outputs
-video-intel analyze "YOUTUBE_URL" --pipeline maximum-coverage
-video-intel analyze "YOUTUBE_URL" --provider ollama --execution-mode hybrid
-video-intel analyze "YOUTUBE_URL" -l en -l es        # caption language priority
-video-intel analyze "YOUTUBE_URL" --until chunks     # stop after a named stage
-video-intel analyze "YOUTUBE_URL" --force             # ignore cached results
-
-# NotebookLM handoff (manual)
-video-intel notebooklm export VIDEO_ID                # source packet + prompts + schema
-video-intel notebooklm import answer.json --video VIDEO_ID
+python run.py video-intel analyze "https://youtu.be/VIDEO_ID" -m quick
+python run.py video-intel web
+python run.py video-intel --help
 ```
 
-Stage exit codes: `0` done, `1` ingestion or total provider failure, `2` bad request or
-configuration, `3` no longer used by `analyze` (kept for compatibility).
+## Adding a tool
 
-Stages run in order and are cached by content hash. A second `analyze` on the same video
-reuses metadata, transcript, chunks and every extraction record; changing an output
-format re-renders Markdown without calling a model. Switching models invalidates the
-extraction records automatically.
+Create `tools/<name>/pyproject.toml`. The launcher discovers tools from the filesystem
+and the workspace globs `tools/*`, so nothing else needs editing:
 
-### Providers
-
-```bash
-ollama serve                      # local, default; transcripts never leave the machine
-video-intel providers             # what is configured, and whether an adapter exists
+```text
+tools/<name>/
+  pyproject.toml     # [project] name, dependencies, [project.scripts]
+  src/<package>/
+  tests/
 ```
 
-Implemented adapters: Ollama (`/api/chat`, JSON mode) and one OpenAI-compatible client
-used for OpenAI, DeepSeek and Groq. `execution_mode: local_only` refuses any remote
-provider at configuration time and again when a pipeline would use one.
+```bash
+python run.py setup        # installs the new tool into the shared environment
+python run.py test         # and its suite runs with everything else
+```
 
-## Configuration
+Two deliberate constraints:
 
-Precedence, lowest to highest:
+- **One shared environment.** Tools cannot pin conflicting versions of the same library.
+  If two tools ever need incompatible versions, split them into separate repositories
+  rather than into separate venvs inside this one.
+- **The workspace root is not a tool.** It carries no importable code, only shared
+  tooling configuration, so a root-level `pip install .` installs nothing.
 
-1. `src/video_intel/config/defaults/config.yaml` (packaged)
-2. the user config — `%APPDATA%\video-intel\config.yaml`, `$XDG_CONFIG_HOME/video-intel/config.yaml`,
-   `~/.config/video-intel/config.yaml`, or `~/Library/Application Support/…` on macOS
-3. `./video-intel.yaml` (or `./config/video-intel.yaml`), found from any subdirectory
-4. `VIDEO_INTEL_*` environment variables
-5. explicit CLI flags
+## Configuration and data
+
+The workspace root holds the things a user owns: `data/`, `.env`, and each tool's
+`video-intel.yaml`-style configuration. Tools locate them by walking up to the root, so
+commands behave identically from any subdirectory, on any device, after the checkout has
+been moved.
+
+Environment variables override everything:
 
 ```bash
-VIDEO_INTEL_DATA_DIR=~/data/video-intel
-VIDEO_INTEL_EXECUTION_MODE=local_only
+VIDEO_INTEL_DATA_DIR=~/data/osint          # where artifacts are written
+VIDEO_INTEL_EXECUTION_MODE=local_only     # refuse to send a transcript off the machine
 VIDEO_INTEL_LOG_LEVEL=DEBUG
 ```
 
-`execution_mode: local_only` refuses any pipeline bound to a remote provider, so a
-transcript cannot leave the machine by accident.
-
 ## Running on more than one device
 
-The project directory is device-independent. Copy it to a laptop, a desktop or a USB
-stick, run `python run.py`, and it behaves identically — the configuration resolves the
-same way, and cached work is reused instead of repeated.
+The checkout is device-independent. Copy it to a laptop, a desktop or a USB stick, run
+`python run.py`, and it behaves identically — the configuration resolves the same way
+and cached work is reused instead of repeated.
 
-**Where things are found.** Commands work from the project root or from any
-subdirectory. `data/`, `video-intel.yaml` and `.env` are located by walking up to the
-project root (recognised by `.video-intel-root`, `video-intel.yaml`, this project's
-`pyproject.toml`, or `.git`) rather than relative to the shell's working directory. A
-relative `data_dir` is interpreted against that root. Drop an empty `.video-intel-root`
-file in a directory to declare it the root explicitly.
+To share one library between machines, point each at a common folder with
+`VIDEO_INTEL_DATA_DIR`. Two notes when that folder is a network share:
 
-**The cache survives a move.** The configuration hash that drives cache invalidation is
-location-independent: the same settings produce the same hash on Linux, macOS and
-Windows, whatever the install path or the user account. Copying a project to another
-machine therefore reuses its transcript, chunk and dataset caches instead of silently
-discarding them.
+- Keep the state database on local disk with `VIDEO_INTEL_DB_PATH`; SQLite wants a local
+  filesystem, and the launcher verifies the journal mode it actually got.
+- Run `video-intel checkpoint` before copying, so a copied `state.db` carries its own
+  schema rather than depending on a sidecar. Without it, copying `state.db` alone after an
+  interrupted run yields a valid-looking file containing no tables at all.
 
-**Sharing one library between machines.** Point every device at a common folder:
-
-```bash
-VIDEO_INTEL_DATA_DIR=/mnt/library/video-intel
-```
-
-Two things to know when the folder is a network share:
-
-- SQLite wants a local filesystem. Keep the state database local and let the JSON
-  artifacts live on the share: `VIDEO_INTEL_DB_PATH=~/.local/state/video-intel.db`.
-  Write-ahead logging is used automatically only where it is supported, and the busy
-  timeout is raised for slow links.
-- Run `python run.py checkpoint` before copying `data/`. It folds the write-ahead log
-  into `state.db`, so the single file carries its own schema instead of depending on a
-  sidecar.
-
-**Running the same video twice at once.** Each video directory holds a lock carrying
-its process id *and the device it was taken on*, so a pid from another machine is never
-mistaken for a live local process. A lock left by a dead local process is reclaimed
-immediately; one left by another machine is reclaimed only after a day, since its owner
-cannot be probed.
-
-**File names travel.** Artifact names are ASCII-only, separators in artifact paths are
-always `/`, and names that Windows reserves (`con`, `nul`, `com1`, …) are rejected.
-JSON and Markdown artifacts are read with a byte-order mark tolerated, so a file saved by
-a Windows editor still loads.
-
-## Storage layout
-
-```text
-data/
-  state.db
-  logs/video-intel.log
-  projects/
-    default/
-      project.json
-      VIDEO_ID/
-        metadata.json
-        raw_transcript.json
-        normalized_transcript.json
-        chunks.json
-        raw_extractions/
-        verified_items.json
-        knowledge.json
-        conflicts.json
-        state.json
-        outputs/
-```
-
-Writes are atomic (temp file + rename, then a directory flush) and keyed by content
-hashes, so changing an output format re-generates outputs without re-running extraction.
-The schema is created and migrated on first use, so a `state.db` copied without its
-write-ahead log repairs itself on the next command.
+Full detail, including the per-device locking model, is in
+[`tools/video-intel/README.md`](tools/video-intel/README.md).
 
 ## Development
 
 ```bash
-python run.py test        # unit tests: no network, no API keys, no model
+python run.py test        # no network, no API keys, no model
 python run.py lint        # ruff check, ruff format --check, mypy --strict
 ```
 
-Integration tests need a local Ollama server and a pulled model; they skip themselves
-otherwise:
+Each tool's suite installs a socket guard, so a test that accidentally reaches the
+network fails instead of silently depending on it.
 
-```bash
-ollama serve && ollama pull qwen2.5:0.5b
-VIDEO_INTEL_TEST_MODEL=qwen2.5:0.5b python run.py integration
-```
+## Status
 
-The unit suite installs a socket guard, so a test that accidentally reaches the network
-fails instead of silently depending on it. `tests/test_portability.py` covers the
-cross-device and cross-platform guarantees described above.
-
-## Roadmap
-
-| Phase | Scope | Status |
-| --- | --- | --- |
-| 1 | Structure, schemas, config, logging, CLI, tests | done |
-| 2 | Transcript ingestion and normalization | done |
-| 3 | Deterministic chunking with overlap | done |
-| 4 | Provider interface, Ollama + one cloud adapter, retries | done |
-| 5 | Extraction pipelines (concept → coverage audit) | done |
-| 6 | Normalization, dedup, verification, conflicts, dataset | done |
-| 7 | Notes, JSON, PPT outline, summary | done |
-| 8 | NotebookLM handoff workflow (manual, not an assumed API) | done |
-| 9 | Resume, caching, integration tests, docs | done |
+See [`tools/video-intel/docs/`](tools/video-intel/docs/) for per-phase implementation
+status and [`project.md`](project.md) for the original specification.

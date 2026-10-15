@@ -1,45 +1,30 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# VOID OSINT extractor - workspace root
+#
+# This file is the workspace, not a distribution. Each tool under tools/ has its own
+# pyproject.toml and is installed, editable, into the single shared virtual environment
+# in .venv/. That keeps one interpreter for the whole repository: tools cannot pin
+# conflicting versions of the same library, and `run.py test` / `run.py lint` cover
+# everything at once.
+#
+# Add a tool by creating tools/<name>/pyproject.toml. No change here is required - the
+# workspace member glob picks it up.
 
 [project]
-name = "video-intel"
+name = "void-osint-extractor"
 version = "0.1.0"
-description = "Transcript-first, multi-AI knowledge extraction for YouTube videos"
+description = "VOID OSINT extraction tools"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
-authors = [{ name = "VOID OSINT" }]
-keywords = ["transcript", "knowledge-extraction", "osint", "youtube", "local-llm"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Environment :: Console",
-    "Environment :: Web Environment",
-    "Intended Audience :: Developers",
-    "Operating System :: MacOS",
-    "Operating System :: Microsoft :: Windows",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Text Processing :: Linguistic",
-    "Topic :: Scientific/Engineering :: Information Analysis",
-    "Typing :: Typed",
-]
-dependencies = [
-    "pydantic>=2.7",
-    "pydantic-settings>=2.2",
-    "PyYAML>=6.0",
-    "httpx>=0.27",
-    "typer>=0.12",
-    "rich>=13.0",
-    # Transcript ingestion. It is imported lazily so the rest of the CLI stays usable
-    # without network features, but every real `analyze` run needs it, so it must be a
-    # declared dependency rather than something that happens to be installed.
-    "youtube-transcript-api>=0.6",
-]
 
-[project.optional-dependencies]
+[tool.uv]
+# The workspace root ships no importable code; only its members are installed.
+package = false
+
+[tool.uv.workspace]
+members = ["tools/*"]
+
+[dependency-groups]
+# Shared development tooling. Every tool's test suite runs with this one installation.
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -49,16 +34,11 @@ dev = [
     "ruff>=0.5",
 ]
 
-[project.scripts]
-video-intel = "video_intel.cli.main:cli"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/video_intel"]
-artifacts = ["src/video_intel/web/index.html"]
+# ---------------------------------------------------------------- pytest
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
+testpaths = ["tools"]
 addopts = "-ra --strict-markers --strict-config"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -75,24 +55,29 @@ markers = [
     "integration: tests that require external services (skipped when unavailable)",
 ]
 
+# ------------------------------------------------------------------ ruff
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["tools"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN"]
 ignore = ["ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ANN201", "ANN001"]
+"**/tests/*" = ["ANN201", "ANN001"]
+
+# ----------------------------------------------------------------- mypy
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
-mypy_path = "src"
-packages = ["video_intel"]
+# Checked explicitly by run.py lint, which enumerates the installed tools; a glob here
+# would also pick up caches and build artefacts.
+mypy_path = "tools"
 
 [[tool.mypy.overrides]]
 module = ["typer", "typer.*", "yaml"]
