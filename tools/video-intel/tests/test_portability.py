@@ -717,15 +717,51 @@ def test_launcher_is_importable_without_dependencies() -> None:
 
 
 def test_launcher_discovers_the_tools() -> None:
-    """Tools are found from the filesystem, so adding one needs no code change."""
+    """Tools are found from the filesystem, so adding one needs no code change.
+
+    Deliberately not asserting that this is the *only* tool: the workspace is expected
+    to grow, and a test pinned to a single tool would fail on the day the next one lands.
+    """
     import runpy
 
     namespace = runpy.run_path(str(REPO_ROOT / "run.py"))
     tools = namespace["discover_tools"]()
-    assert [tool.name for tool in tools] == ["video-intel"]
-    assert "video-intel" in tools[0].scripts
-    assert namespace["find_tool"]("video-intel") is not None
+    names = [tool.name for tool in tools]
+
+    assert "video-intel" in names
+    assert names == sorted(names), "tools should be discovered in a stable order"
+
+    found = namespace["find_tool"]("video-intel")
+    assert found is not None
+    assert "video-intel" in found.scripts
+    assert found.root == TOOL_ROOT
     assert namespace["find_tool"]("no-such-tool") is None
+
+
+def test_launcher_runs_a_tool_by_name() -> None:
+    """`run.py <tool> ...` must reach that tool and not the workspace."""
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "run.py"), "video-intel", "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert result.returncode == 0
+    assert "video-intel" in result.stdout
+
+
+def test_launcher_rejects_an_unknown_tool() -> None:
+    """A typo must fail with guidance, not print the workspace help."""
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "run.py"), "no-such-tool", "analyze"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert result.returncode != 0
+    assert "no-such-tool" in result.stderr
 
 
 def test_shell_wrapper_delegates_to_the_python_launcher() -> None:

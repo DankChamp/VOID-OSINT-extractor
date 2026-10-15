@@ -100,6 +100,21 @@ class Tool:
     def source_dir(self) -> Path:
         return self.root / "src"
 
+    def script_path(self, script: str) -> Path:
+        """Absolute path to one of this tool's console scripts in the shared venv.
+
+        ``Scripts`` on Windows, ``bin`` elsewhere, with a ``.exe`` suffix there. Probed
+        rather than assumed so a checkout copied between platforms still resolves.
+        """
+        if os.name == "nt":
+            return VENV_DIR / "Scripts" / f"{script}.exe"
+        return VENV_DIR / "bin" / script
+
+    @property
+    def primary_script(self) -> str | None:
+        """The console script that best represents this tool, if it declares one."""
+        return self.scripts[0] if self.scripts else None
+
     def __str__(self) -> str:
         return self.name
 
@@ -175,11 +190,34 @@ def ensure_installed() -> Path:
     return python
 
 
+def _pip_install(python: Path, tools: list[Tool]) -> None:
+    """Install every tool and the shared dev tooling with plain pip."""
+    subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
+    for tool in tools:
+        subprocess.run([str(python), "-m", "pip", "install", "-e", str(tool.root)], check=True)
+    subprocess.run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "pytest>=8.0",
+            "pytest-asyncio>=0.23",
+            "anyio>=4.0",
+            "pytest-cov>=5.0",
+            "mypy>=1.10",
+            "ruff>=0.5",
+        ],
+        check=True,
+    )
+
+
 def setup(*, create_env: bool = True) -> Path:
     """Create the shared virtual environment and install every tool, editable.
 
-    ``uv sync`` is used when available because it understands the workspace and installs
-    every member in one resolution. The pip fallback does the same thing by hand.
+    ``uv sync`` is preferred because it understands the workspace and resolves every
+    member in one pass. It is not required: a missing, broken or too-old ``uv`` falls
+    back to pip rather than failing the install.
     """
     python = venv_python()
     tools = discover_tools()
@@ -191,33 +229,23 @@ def setup(*, create_env: bool = True) -> Path:
         python = venv_python()
 
     uv = shutil.which("uv")
+    installed_with_uv = False
     if uv:
-        # --all-packages installs every workspace member (that is, every tool);
-        # without it uv only syncs the root, which ships no code of its own.
-        # --all-groups brings in the shared dev tooling.
-        subprocess.run(
-            [uv, "sync", "--all-packages", "--all-groups"],
-            cwd=str(REPO_ROOT),
-            check=True,
-        )
-    else:
-        subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-        for tool in tools:
-            subprocess.run([str(python), "-m", "pip", "install", "-e", str(tool.root)], check=True)
-        subprocess.run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "pytest>=8.0",
-                "pytest-asyncio>=0.23",
-                "anyio>=4.0",
-                "mypy>=1.10",
-                "ruff>=0.5",
-            ],
-            check=True,
-        )
+        try:
+            # --all-packages installs every workspace member (that is, every tool);
+            # without it uv only syncs the root, which ships no code of its own.
+            # --all-groups brings in the shared dev tooling.
+            subprocess.run(
+                [uv, "sync", "--all-packages", "--all-groups"],
+                cwd=str(REPO_ROOT),
+                check=True,
+            )
+            installed_with_uv = True
+        except (subprocess.CalledProcessError, OSError) as exc:
+            warn(f"uv could not set up the workspace ({exc}); falling back to pip")
+
+    if not installed_with_uv:
+        _pip_install(python, tools)
 
     ok(f"environment ready: {python}")
     for tool in tools:
@@ -236,11 +264,12 @@ def run_tool(python: Path, tool: str, args: list[str]) -> int:
     ).returncode
 
 
-def run_cli(python: Path, package: str, args: list[str]) -> int:
-    """Invoke a tool's CLI as a module.
+def run_cli(python: Path, tool: Tool, args: list[str]) -> int:
+    """Run a tool's command line entry point.
 
-    ``python -m video_intel`` rather than the generated console script, which is
-    per-platform and is not regenerated when dependencies change.
+    The console script the tool declares in ``[project.scripts]`` is preferred, because
+    that is genuinely its CLI and it always exists once installed. ``python -m <package>``
+    is only a fallback: it needs a ``__main__`` module, which plenty of tools do not ship.
     """
     env = dict(os.environ)
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -253,12 +282,26 @@ def run_cli(python: Path, package: str, args: list[str]) -> int:
     env["PYTHONPATH"] = (
         os.pathsep.join([*sources, existing]) if existing else os.pathsep.join(sources)
     )
-    return subprocess.run(
-        [str(python), "-m", package, *args],
-        cwd=str(REPO_ROOT),
-        env=env,
-        check=False,
-    ).returncode
+
+    script = tool.primary_script
+    if script:
+        path = tool.script_path(script)
+        if path.exists():
+            return subprocess.run(
+                [str(path), *args], cwd=str(REPO_ROOT), env=env, check=False
+            ).returncode
+
+    package = tool.name.replace("-", "_")
+    if (tool.source_dir / package / "__main__.py").is_file():
+        return subprocess.run(
+            [str(python), "-m", package, *args], cwd=str(REPO_ROOT), env=env, check=False
+        ).returncode
+
+    fail(
+        f"cannot launch {tool.name}: it declares no console script and has no "
+        f"{package}/__main__.py. Add a [project.scripts] entry to "
+        f"{tool.root.name}/pyproject.toml, then run: python run.py setup"
+    )
 
 
 # -------------------------------------------------------------------------- reporting
@@ -325,7 +368,7 @@ def doctor(python: Path) -> int:
     for tool in discover_tools():
         print()
         info(f"── {tool.name} " + "─" * max(1, 40 - len(tool.name)))
-        status = run_cli(python, tool.name.replace("-", "_"), ["doctor"]) or status
+        status = run_cli(python, tool, ["doctor"]) or status
     return status
 
 
@@ -478,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         arguments = rest
         if arguments and arguments[0] == "web":
             arguments = _web_arguments(arguments)
-        return run_cli(python, tool.name.replace("-", "_"), arguments)
+        return run_cli(python, tool, arguments)
 
     if command in launcher_commands:
         print(USAGE)
