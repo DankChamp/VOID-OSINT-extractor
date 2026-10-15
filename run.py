@@ -328,13 +328,15 @@ def main(argv: list[str] | None = None) -> int:
         return first_run(ensure_installed())
 
     command, rest = raw[0], raw[1:]
+    # Commands the launcher implements itself. Anything not listed here is forwarded
+    # verbatim to the video-intel CLI, with the subcommand included: `run.py init` must
+    # reach the CLI as `video-intel init`, not as a bare `video-intel`.
     known = {
         "setup",
         "doctor",
         "test",
         "integration",
         "lint",
-        "init",
         "web",
         "ollama",
         "pull",
@@ -349,11 +351,23 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         return 0
 
-    python = ensure_installed()
-
+    # `setup` builds the environment itself; every other command needs one to exist
+    # first. Calling ensure_installed() unconditionally here would run setup twice on a
+    # first run, reinstalling the package for no reason.
     if command == "setup":
         setup()
         return 0
+    if command == "ollama":
+        return start_ollama()
+    if command == "pull":
+        binary = shutil.which("ollama")
+        if not binary:
+            warn("ollama is not installed")
+            return 1
+        return subprocess.run([binary, "pull", *rest]).returncode
+
+    python = ensure_installed()
+
     if command == "doctor":
         doctor(python)
         return 0
@@ -365,14 +379,6 @@ def main(argv: list[str] | None = None) -> int:
         code = run_tool(python, "ruff", ["check", "."])
         code = run_tool(python, "ruff", ["format", "--check", "."]) or code
         return run_tool(python, "mypy", rest) or code
-    if command == "ollama":
-        return start_ollama()
-    if command == "pull":
-        binary = shutil.which("ollama")
-        if not binary:
-            warn("ollama is not installed")
-            return 1
-        return subprocess.run([binary, "pull", *rest]).returncode
     if command == "checkpoint":
         return checkpoint(python)
     if command == "shell":
