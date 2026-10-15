@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>video-intel</title>
+<style>
+  :root {
+    --bg: #10131a;
+    --panel: #171b24;
+    --panel-2: #1e2430;
+    --line: #2a3140;
+    --text: #e6e9ef;
+    --muted: #99a3b5;
+    --accent: #6ea8fe;
+    --ok: #57c98a;
+    --warn: #e6b455;
+    --err: #e2686b;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  header .meta code { font-family: var(--mono); }
+  main { display: grid; grid-template-columns: minmax(340px, 420px) 1fr; gap: 16px; padding: 16px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  section + section { margin-top: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], select, textarea {
+    width: 100%; padding: 8px 10px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px; font-size: 14px; font-family: inherit;
+  }
+  input[type=text]:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    padding: 9px 14px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--text); cursor: pointer; font-size: 14px;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .check input { width: auto; }
+  pre {
+    margin: 0; padding: 10px; background: #0c0f15; border: 1px solid var(--line);
+    border-radius: 7px; font-family: var(--mono); font-size: 12.5px;
+    max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12px; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: var(--panel-2); }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); }
+  .pill.completed, .pill.ok { color: var(--ok); border-color: #2d5b45; background: #16251e; }
+  .pill.running { color: var(--accent); border-color: #2f4674; background: #141c2b; }
+  .pill.failed, .pill.err { color: var(--err); border-color: #6b3234; background: #2a1618; }
+  .pill.pending, .pill.skipped { color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .error { color: var(--err); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tabs button { padding: 5px 10px; font-size: 12px; }
+  .tabs button[aria-selected=true] { border-color: var(--accent); color: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .stat .n { font-size: 20px; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+  .badge-key { color: var(--ok); }
+  .badge-nokey { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>video-intel</h1>
+  <div class="meta">
+    project <code id="hdr-project">…</code> ·
+    mode <code id="hdr-mode">…</code> ·
+    data <code id="hdr-data">…</code>
+  </div>
+</header>
+
+<main>
+  <div>
+    <section>
+      <h2>Analyze a video</h2>
+      <label for="url">YouTube URL</label>
+      <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" />
+
+      <div class="row">
+        <div>
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="deep">deep (all pipelines)</option>
+            <option value="ppt">ppt</option>
+            <option value="quick">quick</option>
+          </select>
+        </div>
+        <div>
+          <label for="until">Stop after</label>
+          <select id="until"><option value="">run everything</option></select>
+        </div>
+      </div>
+
+      <label for="lang">Caption languages (comma separated, priority order)</label>
+      <input id="lang" type="text" placeholder="en" autocomplete="off" />
+
+      <div class="check">
+        <input id="force" type="checkbox" />
+        <label for="force" style="margin:0">Ignore cached results (<code>--force</code>)</label>
+      </div>
+
+      <div class="actions">
+        <button id="run" class="primary">Run analysis</button>
+        <button id="refresh">Refresh</button>
+      </div>
+      <div id="run-error" class="error"></div>
+    </section>
+
+    <section>
+      <h2>Providers</h2>
+      <table><thead><tr><th>name</th><th>kind</th><th>adapter</th><th>key</th></tr></thead>
+      <tbody id="providers"></tbody></table>
+      <p class="hint">Keys are read from the environment or a <code>.env</code> file and are never displayed.</p>
+    </section>
+
+    <section>
+      <h2>Stored videos</h2>
+      <table><thead><tr><th>video</th><th>stages</th><th>dataset</th></tr></thead>
+      <tbody id="videos"></tbody></table>
+      <p class="hint" id="videos-empty">No stored videos yet.</p>
+    </section>
+  </div>
+
+  <div>
+    <section>
+      <h2 id="detail-title">Run output</h2>
+      <div id="detail-stats" class="grid2" style="margin-bottom:10px"></div>
+      <pre id="log">Start a run to see progress here.</pre>
+      <p class="hint">Runs execute the same CLI the terminal uses, including caching and the per-video lock.</p>
+    </section>
+
+    <section id="detail-section" style="display:none">
+      <h2>Stage state</h2>
+      <table><thead><tr><th>stage</th><th>state</th><th>attempts</th><th>error</th></tr></thead>
+      <tbody id="stages"></tbody></table>
+
+      <h2 style="margin-top:16px">Outputs</h2>
+      <div class="tabs" id="output-tabs"></div>
+      <pre id="output">Select a generated file to read it.</pre>
+
+      <div class="actions">
+        <button id="nb-export">NotebookLM export</button>
+      </div>
+      <div id="nb-error" class="error"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { job: null, timer: null, video: null, outputFile: null };
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const text = await response.text();
+  let payload;
+  try { payload = text ? JSON.parse(text) : {}; }
+  catch { throw new Error(text.slice(0, 400)); }
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+function pill(state) {
+  const span = document.createElement('span');
+  span.className = 'pill ' + (state || 'pending');
+  span.textContent = state || 'pending';
+  return span;
+}
+
+async function loadStatus() {
+  const status = await api('/api/status');
+  $('hdr-project').textContent = status.project;
+  $('hdr-mode').textContent = status.execution_mode;
+  $('hdr-data').textContent = status.data_dir;
+
+  const until = $('until');
+  const current = until.value;
+  while (until.options.length > 1) until.remove(1);
+  status.stages.forEach(stage => {
+    const option = document.createElement('option');
+    option.value = stage;
+    option.textContent = stage;
+    until.appendChild(option);
+  });
+  until.value = current;
+
+  const body = $('providers');
+  body.innerHTML = '';
+  status.providers.forEach(provider => {
+    const row = body.insertRow();
+    row.insertCell().textContent = provider.name;
+    row.insertCell().textContent = provider.kind;
+    const adapter = row.insertCell();
+    adapter.appendChild(pill(provider.adapter_implemented ? 'completed' : 'skipped'));
+    const key = row.insertCell();
+    const badge = document.createElement('span');
+    badge.className = provider.api_key_present ? 'badge-key' : 'badge-nokey';
+    badge.textContent = provider.api_key_present ? 'set' : (provider.api_key_env || 'none');
+    key.appendChild(badge);
+  });
+}
+
+async function loadVideos() {
+  const data = await api('/api/videos');
+  const body = $('videos');
+  body.innerHTML = '';
+  $('videos-empty').style.display = data.videos.length ? 'none' : 'block';
+  data.videos.forEach(video => {
+    const row = body.insertRow();
+    row.className = 'clickable';
+    const idCell = row.insertCell();
+    idCell.className = 'mono';
+    idCell.textContent = video.video_id;
+    const stageCell = row.insertCell();
+    const done = Object.values(video.stages).filter(s => s === 'completed').length;
+    stageCell.appendChild(pill(done ? `${done} done` : 'pending'));
+    const dataCell = row.insertCell();
+    dataCell.appendChild(pill(video.has_dataset ? 'completed' : 'skipped'));
+    row.onclick = () => showVideo(video.video_id);
+  });
+}
+
+async function showVideo(videoId) {
+  state.video = videoId;
+  const detail = await api('/api/video/' + encodeURIComponent(videoId));
+  $('detail-section').style.display = 'block';
+  $('detail-title').textContent = 'Video ' + videoId + (detail.metadata ? ' — ' + (detail.metadata.title || '') : '');
+
+  const stats = $('detail-stats');
+  stats.innerHTML = '';
+  const addStat = (label, value) => {
+    const box = document.createElement('div');
+    box.className = 'stat';
+    box.innerHTML = '<div class="n"></div><div class="l"></div>';
+    box.querySelector('.n').textContent = value;
+    box.querySelector('.l').textContent = label;
+    stats.appendChild(box);
+  };
+  if (detail.dataset) {
+    addStat('items', detail.dataset.items);
+    addStat('topics', detail.dataset.topics);
+    addStat('conflicts', detail.dataset.conflicts);
+    addStat('unsupported', detail.dataset.unsupported);
+    addStat('verification', detail.dataset.complete ? 'complete' : 'partial');
+  } else {
+    addStat('dataset', 'not built');
+  }
+  if (detail.metadata && detail.metadata.duration_seconds) {
+    addStat('duration', Math.round(detail.metadata.duration_seconds) + 's');
+  }
+
+  const stages = $('stages');
+  stages.innerHTML = '';
+  detail.stages.forEach(stage => {
+    const row = stages.insertRow();
+    row.insertCell().className = 'mono';
+    row.insertCell().textContent = stage.stage_id;
+    row.insertCell().appendChild(pill(stage.state));
+    row.insertCell().textContent = stage.attempts;
+    row.insertCell().textContent = stage.error || '';
+  });
+
+  const files = ['full_notes.md', 'summary.md', 'ppt_outline.md', 'knowledge.json']
+    .filter(name => (detail.artifacts['outputs/' + name]));
+  const tabs = $('output-tabs');
+  tabs.innerHTML = '';
+  files.forEach(name => {
+    const button = document.createElement('button');
+    button.textContent = name;
+    button.setAttribute('aria-selected', String(name === state.outputFile));
+    button.onclick = async () => {
+      state.outputFile = name;
+      $('output').textContent = await api(
+        '/api/output?video=' + encodeURIComponent(videoId) + '&name=' + encodeURIComponent(name));
+      showVideo(videoId);
+    };
+    tabs.appendChild(button);
+  });
+  if (files.length && !state.outputFile) {
+    state.outputFile = files[0];
+    tabs.firstChild.click();
+  }
+}
+
+async function startRun() {
+  $('run-error').textContent = '';
+  $('run').disabled = true;
+  try {
+    const languages = $('lang').value.split(',').map(s => s.trim()).filter(Boolean);
+    const job = await api('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: $('url').value.trim(),
+        mode: $('mode').value,
+        until: $('until').value || null,
+        force: $('force').checked,
+        languages: languages,
+      }),
+    });
+    state.job = job;
+    state.outputFile = null;
+    $('log').textContent = '';
+    poll();
+  } catch (error) {
+    $('run-error').textContent = error.message;
+  } finally {
+    $('run').disabled = false;
+  }
+}
+
+function poll() {
+  clearInterval(state.timer);
+  state.timer = setInterval(async () => {
+    if (!state.job) return;
+    try {
+      const job = await api('/api/job/' + state.job.job_id);
+      $('log').textContent = job.log.join('\n') || 'working…';
+      $('log').scrollTop = $('log').scrollHeight;
+      if (job.status !== 'running') {
+        clearInterval(state.timer);
+        state.timer = null;
+        if (job.video_id) await showVideo(job.video_id);
+        await loadVideos();
+      }
+    } catch (error) {
+      clearInterval(state.timer);
+      state.timer = null;
+      $('run-error').textContent = error.message;
+    }
+  }, 900);
+}
+
+async function refreshAll() {
+  try {
+    await loadStatus();
+    await loadVideos();
+    if (state.video) await showVideo(state.video);
+  } catch (error) {
+    $('run-error').textContent = error.message;
+  }
+}
+
+$('run').onclick = startRun;
+$('refresh').onclick = refreshAll;
+$('url').addEventListener('keydown', event => { if (event.key === 'Enter') startRun(); });
+$('nb-export').onclick = async () => {
+  $('nb-error').textContent = '';
+  if (!state.video) { $('nb-error').textContent = 'Select a video first.'; return; }
+  try {
+    const job = await api('/api/notebooklm/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_id: state.video }),
+    });
+    $('log').textContent = 'NotebookLM export started: ' + job.job_id;
+  } catch (error) {
+    $('nb-error').textContent = error.message;
+  }
+};
+
+refreshAll();
+setInterval(() => { if (!state.job || state.timer === null) refreshAll(); }, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0.0",
+  "video_id": "synthetic001",
+  "language": "en",
+  "detected_language": "en",
+  "kind": "automatic",
+  "source": "fixture",
+  "source_detail": { "note": "synthetic fixture, not a real video" },
+  "segments": [
+    {
+      "segment_id": "segment_001",
+      "start_seconds": 0.0,
+      "end_seconds": 18.5,
+      "text": "Welcome back. Today we are going to talk about risk assessment and why it matters for security teams."
+    },
+    {
+      "segment_id": "segment_002",
+      "start_seconds": 18.5,
+      "end_seconds": 44.0,
+      "text": "Risk assessment is the process of identifying, analyzing and evaluating risk against a set of objectives."
+    },
+    {
+      "segment_id": "segment_003",
+      "start_seconds": 44.0,
+      "end_seconds": 71.25,
+      "text": "Let me define the three components clearly. Risk is the combination of likelihood and impact."
+    },
+    {
+      "segment_id": "segment_004",
+      "start_seconds": 71.25,
+      "end_seconds": 99.0,
+      "text": "Asset identification comes first. You cannot protect what you have not written down."
+    },
+    {
+      "segment_id": "segment_005",
+      "start_seconds": 99.0,
+      "end_seconds": 128.75,
+      "text": "In one study we ran last year, teams that documented assets recovered forty percent faster after an incident."
+    },
+    {
+      "segment_id": "segment_006",
+      "start_seconds": 128.75,
+      "end_seconds": 155.0,
+      "text": "Threat identification follows. That is where you list what could go wrong against those assets."
+    },
+    {
+      "segment_id": "segment_007",
+      "start_seconds": 155.0,
+      "end_seconds": 187.5,
+      "text": "To be precise: risk assessment identifies potential threats, evaluates their likelihood, and evaluates their potential impact."
+    },
+    {
+      "segment_id": "segment_008",
+      "start_seconds": 187.5,
+      "end_seconds": 214.0,
+      "text": "Risk assessment evaluates the likelihood of a threat materialising. Likelihood is usually rated low, medium or high."
+    },
+    {
+      "segment_id": "segment_009",
+      "start_seconds": 214.0,
+      "end_seconds": 243.25,
+      "text": "Impact is rated the same way, and the two ratings are multiplied to produce a risk score."
+    },
+    {
+      "segment_id": "segment_010",
+      "start_seconds": 243.25,
+      "end_seconds": 276.0,
+      "text": "Remember the core definition: risk assessment is the process of identifying, analyzing and evaluating risk against a set of objectives."
+    },
+    {
+      "segment_id": "segment_011",
+      "start_seconds": 276.0,
+      "end_seconds": 305.5,
+      "text": "The four standard treatment options are mitigation, transfer, acceptance and avoidance."
+    },
+    {
+      "segment_id": "segment_012",
+      "start_seconds": 305.5,
+      "end_seconds": 330.0,
+      "text": "That is the core of the framework. Next time we will walk through mitigation in detail."
+    }
+  ]
+}

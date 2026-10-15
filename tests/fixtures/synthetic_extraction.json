@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "pipeline_id": "fact",
+  "notes": "Synthetic model response used by unit tests. No real model produced this.",
+  "items": [
+    {
+      "item_id": "item_001",
+      "type": "definition",
+      "statement": "Risk assessment is the process of identifying, analyzing and evaluating risk against a set of objectives.",
+      "details": [
+        "Risk is the combination of likelihood and impact."
+      ],
+      "source_segment_ids": ["segment_002", "segment_010"],
+      "uncertainties": [],
+      "confidence": "high"
+    },
+    {
+      "item_id": "item_002",
+      "type": "fact",
+      "statement": "Teams that documented assets recovered forty percent faster after an incident.",
+      "details": ["Measured in a study the speaker ran last year."],
+      "source_segment_ids": ["segment_005"],
+      "uncertainties": []
+    },
+    {
+      "item_id": "item_003",
+      "type": "framework",
+      "statement": "The four standard treatment options are mitigation, transfer, acceptance and avoidance.",
+      "details": [],
+      "source_segment_ids": ["segment_011"],
+      "uncertainties": []
+    },
+    {
+      "item_id": "item_004",
+      "type": "claim",
+      "statement": "Risk assessment reduces security incidents by ninety percent.",
+      "details": [],
+      "source_segment_ids": ["segment_007"],
+      "uncertainties": ["No supporting figure was found in the transcript."]
+    }
+  ]
+}

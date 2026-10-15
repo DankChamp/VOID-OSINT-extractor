@@ -1,0 +1,99 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "video-intel"
+version = "0.1.0"
+description = "Transcript-first, multi-AI knowledge extraction for YouTube videos"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "VOID OSINT" }]
+keywords = ["transcript", "knowledge-extraction", "osint", "youtube", "local-llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "PyYAML>=6.0",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=13.0",
+    # Transcript ingestion. It is imported lazily so the rest of the CLI stays usable
+    # without network features, but every real `analyze` run needs it, so it must be a
+    # declared dependency rather than something that happens to be installed.
+    "youtube-transcript-api>=0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "anyio>=4.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+video-intel = "video_intel.cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/video_intel"]
+artifacts = ["src/video_intel/web/index.html"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Any warning fails a test; this is what caught the provider socket leak. Deprecation
+# warnings from dependencies are exempted because a newer interpreter or a freshly
+# resolved dependency set would otherwise fail the suite for reasons unrelated to this
+# code, and the suite has to stay runnable on every device.
+filterwarnings = [
+    "error",
+    "default::DeprecationWarning",
+    "default::PendingDeprecationWarning",
+]
+markers = [
+    "integration: tests that require external services (skipped when unavailable)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN201", "ANN001"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+mypy_path = "src"
+packages = ["video_intel"]
+
+[[tool.mypy.overrides]]
+module = ["typer", "typer.*", "yaml"]
+ignore_missing_imports = true

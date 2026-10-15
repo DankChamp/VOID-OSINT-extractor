@@ -1,0 +1,20 @@
+# Normalise text files in the repository, and keep the working tree identical
+# everywhere. Without this, a checkout on Windows or from a FAT32 USB stick rewrites
+# run.sh with CRLF and the shell fails on every line with $'\r': command not found.
+* text=auto eol=lf
+
+# The launcher must stay LF-only and executable.
+*.sh text eol=lf
+run.py text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+
+# Never rewrite these.
+data/** binary
+*.db binary
+*.log binary
+.env binary

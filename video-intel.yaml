@@ -1,0 +1,91 @@
+# Project configuration.
+#
+# Precedence: packaged defaults < this file < VIDEO_INTEL_* environment variables < CLI flags.
+# API keys live in .env (git-ignored), never here. See .env.example.
+
+data_dir: ./data
+project_name: default
+
+# local_only refuses any remote provider. Use hybrid when Groq (or another cloud
+# provider) is bound to a pipeline below.
+execution_mode: hybrid
+
+log_level: INFO
+
+# Chunks are sent to the model as prompts. Keep max_chars inside the model's context
+# window; ~12000 characters is roughly 3000 tokens.
+chunking:
+  max_chars: 12000
+  overlap_chars: 600
+  min_chars: 800
+  respect_sentences: true
+
+providers:
+  groq:
+    enabled: true
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    default_model: openai/gpt-oss-120b
+    models:
+      - openai/gpt-oss-120b
+      - openai/gpt-oss-20b
+      - qwen/qwen3.8-27b
+      - allam-2-7b
+    timeout_seconds: 120
+    # The free tier allows ~8000 tokens/minute; a 3000-token prompt per call means
+    # one call at a time with room to retry.
+    max_retries: 4
+    concurrency: 1
+
+  ollama:
+    enabled: true
+    default_model: qwen2.5:0.5b
+    timeout_seconds: 600
+
+# Pipeline -> provider binding. Groq handles the structured extraction passes;
+# Ollama is kept for cheap local work such as the coverage audit.
+pipelines:
+  concept:      {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  definition:   {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  fact:         {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  example:      {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  framework:    {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  process:      {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  comparison:   {provider: groq,  model: openai/gpt-oss-120b, passes: 1, max_items_per_chunk: 25}
+  coverage_audit: {provider: ollama, model: qwen2.5:0.5b, passes: 1, max_items_per_chunk: 25}
+
+modes:
+  quick:
+    pipelines: [concept, definition, fact]
+  ppt:
+    pipelines: [concept, definition, fact, example, comparison]
+  deep:
+    pipelines:
+      [concept, definition, fact, example, framework, process, comparison, coverage_audit]
+
+presets:
+  default:
+    mode: deep
+    pipelines:
+      [concept, definition, fact, example, framework, process, comparison, coverage_audit]
+  fast:
+    mode: quick
+    pipelines: [concept, definition, fact]
+  maximum-coverage:
+    mode: deep
+    pipelines:
+      [concept, definition, fact, example, framework, process, comparison, coverage_audit]
+
+ingest:
+  languages: [en]
+  prefer_manual_tracks: true
+  use_watch_page_metadata: true
+
+verification:
+  enabled: true
+  deterministic_checks: true
+  drop_unsupported_from_outputs: true
+  flag_unsupported_for_review: true
+
+transcription:
+  enabled: false

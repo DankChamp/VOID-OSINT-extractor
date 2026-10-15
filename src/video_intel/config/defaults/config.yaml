@@ -1,0 +1,280 @@
+# video-intel default configuration
+#
+# Precedence: this file < user config < project config < VIDEO_INTEL_* env < CLI flags.
+# Never put API keys here. Only the NAME of the environment variable that holds a
+# key belongs in this file (`api_key_env`).
+
+config_version: "1.0"
+
+# Storage root for projects, artifacts, logs and the state database (§15).
+data_dir: "data"
+project_name: "default"
+
+# local_only | cloud_only | hybrid (§17).
+# local_only refuses configurations that route transcript data to a remote provider.
+execution_mode: local_only
+
+log_level: INFO
+log_format: text
+
+# Chunking defaults (§6); overridable per project.
+chunking:
+  max_chars: 6000
+  overlap_chars: 600
+  min_chars: 500
+  respect_sentences: true
+  estimated_chars_per_token: 4
+
+max_extraction_passes: 2
+
+# --------------------------------------------------------------------------------------
+# Providers (§7). `implemented: false` means the declaration exists but the adapter has
+# not shipped yet (Phase 4); the CLI reports this status honestly.
+# --------------------------------------------------------------------------------------
+providers:
+  ollama:
+    kind: ollama
+    enabled: true
+    local: true
+    base_url: http://127.0.0.1:11434
+    models:
+      - llama3.1:8b
+      - qwen2.5:7b
+    default_model: llama3.1:8b
+    timeout_seconds: 300
+    max_retries: 2
+    implemented: true
+    notes: Local inference. Primary default so transcripts stay on the machine.
+
+  openai:
+    kind: openai_compatible
+    enabled: true
+    local: false
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    models:
+      - gpt-4o-mini
+    default_model: gpt-4o-mini
+    timeout_seconds: 120
+    implemented: true
+    notes: Cloud. Transcript text is sent to OpenAI only when a pipeline selects it.
+
+  deepseek:
+    kind: deepseek
+    enabled: true
+    local: false
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+    models:
+      - deepseek-chat
+    default_model: deepseek-chat
+    timeout_seconds: 120
+    implemented: true
+
+  groq:
+    kind: groq
+    enabled: true
+    local: false
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    models:
+      - llama-3.3-70b-versatile
+    default_model: llama-3.3-70b-versatile
+    timeout_seconds: 90
+    implemented: true
+
+  gemini:
+    kind: gemini
+    enabled: true
+    local: false
+    api_key_env: GEMINI_API_KEY
+    models:
+      - gemini-2.0-flash
+    default_model: gemini-2.0-flash
+    timeout_seconds: 120
+    implemented: false
+
+  # Not an API provider: a manual, source-grounded handoff workflow (§7, Phase 8).
+  notebooklm_handoff:
+    kind: notebooklm_handoff
+    enabled: true
+    local: false
+    implemented: false
+    notes: >-
+      Manual import/export only. No supported public API is assumed for automated
+      notebook creation or result retrieval; verify before automating anything.
+
+# --------------------------------------------------------------------------------------
+# Pipelines (§8). All default to the local Ollama provider.
+# --------------------------------------------------------------------------------------
+pipelines:
+  concept:
+    pipeline_id: concept
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Major topics, subtopics, relationships and explanations.
+
+  definition:
+    pipeline_id: definition
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Terminology, definitions, distinctions and technical vocabulary.
+
+  fact:
+    pipeline_id: fact
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Numbers, statistics, dates, measurements and specifications.
+
+  example:
+    pipeline_id: example
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Demonstrations, hypotheticals, case studies, analogies.
+
+  framework:
+    pipeline_id: framework
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Named frameworks, standards, methodologies, classifications, models.
+
+  process:
+    pipeline_id: process
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Procedures, workflows, ordered steps, decision processes.
+
+  comparison:
+    pipeline_id: comparison
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: Comparisons, differences, advantages, disadvantages, trade-offs.
+
+  coverage_audit:
+    pipeline_id: coverage_audit
+    provider: ollama
+    model: llama3.1:8b
+    passes: 1
+    description: >-
+      Reads the transcript chunks directly and reports information that the other
+      pipelines appear to have missed. Must not rely on prior model output alone.
+
+# --------------------------------------------------------------------------------------
+# Modes (§14, §16).
+# --------------------------------------------------------------------------------------
+modes:
+  deep:
+    mode: deep
+    pipelines:
+      - concept
+      - definition
+      - fact
+      - example
+      - framework
+      - process
+      - comparison
+      - coverage_audit
+    outputs:
+      - full_notes.md
+      - knowledge.json
+      - ppt_outline.md
+      - summary.md
+    description: Full extraction, verification and every output.
+
+  ppt:
+    mode: ppt
+    pipelines:
+      - concept
+      - definition
+      - fact
+      - example
+      - framework
+      - comparison
+    outputs:
+      - ppt_outline.md
+      - knowledge.json
+    description: Presentation-oriented extraction.
+
+  quick:
+    mode: quick
+    pipelines:
+      - concept
+      - definition
+    outputs:
+      - summary.md
+      - knowledge.json
+    description: Fast pass. Summary is still generated from the dataset, never from the raw transcript.
+
+# --------------------------------------------------------------------------------------
+# Presets selected with `--pipeline <name>` (§16).
+# --------------------------------------------------------------------------------------
+presets:
+  default:
+    name: default
+    mode: deep
+    pipelines:
+      - concept
+      - definition
+      - fact
+      - example
+      - framework
+      - process
+      - comparison
+      - coverage_audit
+    description: All pipelines, one pass each.
+
+  maximum-coverage:
+    name: maximum-coverage
+    mode: deep
+    pipelines:
+      - concept
+      - definition
+      - fact
+      - example
+      - framework
+      - process
+      - comparison
+      - coverage_audit
+    description: All pipelines plus a second extraction pass and a local verifier model.
+
+  fast:
+    name: fast
+    mode: quick
+    pipelines:
+      - concept
+      - definition
+      - fact
+    description: Cheapest useful run.
+
+verification:
+  enabled: true
+  deterministic_checks: true
+  verifier_provider: null
+  verifier_model: null
+  context_window_segments: 1
+  drop_unsupported_from_outputs: true
+  flag_unsupported_for_review: true
+
+# Transcript acquisition (§4).
+ingest:
+  languages:
+    - en
+  prefer_manual_tracks: true
+  use_watch_page_metadata: true
+  proxy: null
+  request_timeout_seconds: 20
+
+# Speech-to-text fallback (§4). Off by default and requires explicit opt-in.
+transcription:
+  enabled: false
+  backend: null
+  model: null
+  language: null
+  require_explicit_opt_in: true
