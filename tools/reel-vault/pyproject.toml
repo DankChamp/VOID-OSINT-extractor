@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reel-vault"
+version = "0.1.0"
+description = "Official Instagram export to a classified, archived reel library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "VOID OSINT" }]
+keywords = ["instagram", "reels", "archive", "osint", "knowledge-extraction", "local-first"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "PyYAML>=6.0",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=13.0",
+    "beautifulsoup4>=4.12",
+    "ftfy>=6.1",
+    "yt-dlp>=2024.1",
+    "reportlab>=4.0",
+    "textual>=0.60",
+]
+
+[project.optional-dependencies]
+# RapidOCR is optional because its ONNX runtime does not publish wheels for every
+# Python version. The pipeline degrades to transcript-only when it is absent.
+ocr = ["rapidocr>=3.0"]
+
+[project.scripts]
+reel-vault = "reel_vault.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reel_vault"]
