@@ -660,30 +660,94 @@ def review(ctx: typer.Context) -> None:
 @app.command()
 def classify(
     ctx: typer.Context,
-    shortcode: Annotated[str, typer.Argument(help="Instagram shortcode.")],
+    shortcode: Annotated[
+        str | None, typer.Argument(help="Instagram shortcode (optional in batch mode).")
+    ] = None,
+    limit: Annotated[int | None, typer.Option("--limit", help="Classify at most N reels.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-classify finished reels.")] = False,
+    model: Annotated[
+        str | None, typer.Option("--model", help="Override the classification model.")
+    ] = None,
     primary: Annotated[
-        str | None, typer.Option("--primary", help="Set the primary category.")
+        str | None, typer.Option("--primary", help="Manually set the primary category.")
     ] = None,
     add: Annotated[
-        list[str] | None, typer.Option("--add", help="Add a secondary category.")
+        list[str] | None, typer.Option("--add", help="Manually add a secondary category.")
     ] = None,
 ) -> None:
-    """Manually override a reel's categories."""
+    """Classify reels with taxonomy categories, or manually override one."""
     context = context_from_typer(ctx)
+
+    # Manual override mode: --primary or --add on a single reel.
+    if primary is not None or add is not None:
+        if shortcode is None:
+            err_console.print("[red]--primary/--add require a shortcode argument.[/red]")
+            raise typer.Exit(code=EXIT_ERROR)
+        with context.store() as store:
+            reel = store.get_reel(shortcode)
+            if reel is None:
+                err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
+                raise typer.Exit(code=EXIT_ERROR)
+            existing = store.get_review(shortcode) or {}
+            overrides = dict(existing.get("overrides") or {})
+            if primary:
+                overrides["primary"] = primary
+            if add:
+                overrides["add"] = sorted(set(overrides.get("add") or []) | set(add))
+            existing["overrides"] = overrides
+            store.save_review(shortcode, existing)
+        console.print(f"[green]saved[/green] review overrides for {shortcode}")
+        return
+
+    # Automatic classification mode.
+    if not os.environ.get(context.config.groq.api_key_env):
+        err_console.print(
+            f"[red]classify unavailable:[/red] {context.config.groq.api_key_env} is not set"
+        )
+        raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
+
+    from reel_vault.classification.service import ClassificationService
+
     with context.store() as store:
-        reel = store.get_reel(shortcode)
-        if reel is None:
+        if shortcode is not None and store.get_reel(shortcode) is None:
             err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
             raise typer.Exit(code=EXIT_ERROR)
-        existing = store.get_review(shortcode) or {}
-        overrides = dict(existing.get("overrides") or {})
-        if primary:
-            overrides["primary"] = primary
-        if add:
-            overrides["add"] = sorted(set(overrides.get("add") or []) | set(add))
-        existing["overrides"] = overrides
-        store.save_review(shortcode, existing)
-    console.print(f"[green]saved[/green] review overrides for {shortcode}")
+        service = ClassificationService(store, context.paths, context.config, model=model)
+        summary = service.classify_pending(
+            limit=limit,
+            force=force,
+            shortcodes=[shortcode] if shortcode else None,
+        )
+
+    table = Table(title="classification results")
+    table.add_column("shortcode")
+    table.add_column("primary")
+    table.add_column("confidence", justify="right")
+    table.add_column("secondary", justify="right")
+    table.add_column("method")
+    table.add_column("review", justify="right")
+    for result in summary.results:
+        primary_name = result.primary.name if result.primary else "-"
+        conf = f"{result.primary.confidence:.2f}" if result.primary else "-"
+        secondary = ", ".join(label.name for label in result.secondary) or "-"
+        table.add_row(
+            result.shortcode,
+            primary_name,
+            conf,
+            secondary,
+            result.method.value,
+            "yes" if result.needs_review else "no",
+        )
+    console.print(table)
+
+    console.print(
+        f"[green]classified[/green] {summary.classified} labeled, "
+        f"{summary.needs_review} needs review, {summary.failed} failed"
+    )
+    if summary.cost_usd:
+        console.print(f"  estimated cost: ${summary.cost_usd:.4f}")
+    for code, reason in sorted(summary.failures.items()):
+        console.print(f"  [yellow]{code}[/yellow]: {reason}")
 
 
 __all__ = ["app", "main_callback"]

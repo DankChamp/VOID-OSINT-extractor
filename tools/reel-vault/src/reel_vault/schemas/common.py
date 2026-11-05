@@ -30,6 +30,7 @@ class ReelStatus(StrEnum):
     TRANSCRIPT_FAILED = "transcript_failed"
     TRIAGE_FAILED = "triage_failed"
     EXTRACTION_FAILED = "extraction_failed"
+    CLASSIFICATION_FAILED = "classification_failed"
     FAILED = "failed"
 
 

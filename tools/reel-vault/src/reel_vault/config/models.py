@@ -52,6 +52,7 @@ class GroqConfig(_Model):
     base_url: str = "https://api.groq.com/openai/v1"
     triage_model: str = "openai/gpt-oss-120b"
     extraction_model: str = "openai/gpt-oss-120b"
+    classification_model: str = "openai/gpt-oss-120b"
     whisper_model: str = "whisper-large-v3-turbo"
     whisper_cost_per_hour: float = Field(default=0.04, ge=0.0)
     chat_input_usd_per_million: float = Field(default=0.15, ge=0.0)
@@ -66,6 +67,12 @@ class TriageConfig(_Model):
     needs_review_threshold: int = Field(default=60, ge=0, le=100)
     fallback: FallbackDepth = "standard"
     max_input_chars: int = Field(default=6000, ge=500, le=50000)
+
+
+class ClassifyConfig(_Model):
+    needs_review_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    rule_confidence_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    max_secondary: int = Field(default=4, ge=0, le=20)
 
 
 class TranscriptionConfig(_Model):
@@ -100,6 +107,7 @@ class AppConfig(_Model):
     triage: TriageConfig = Field(default_factory=TriageConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     ocr: OcrConfig = Field(default_factory=OcrConfig)
+    classify: ClassifyConfig = Field(default_factory=ClassifyConfig)
     taxonomy_file: Path | None = None
     archive_rules_file: Path | None = None
     log_level: str = "INFO"
@@ -112,6 +120,7 @@ class AppConfig(_Model):
 
 __all__ = [
     "AppConfig",
+    "ClassifyConfig",
     "DownloadConfig",
     "DownloadMode",
     "EnrichConfig",

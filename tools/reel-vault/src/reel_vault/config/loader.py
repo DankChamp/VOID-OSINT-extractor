@@ -75,6 +75,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "fallback": "standard",
         "max_input_chars": 6000,
     },
+    "classify": {
+        "needs_review_threshold": 0.60,
+        "rule_confidence_threshold": 0.75,
+        "max_secondary": 4,
+    },
     "transcription": {
         "enabled": True,
         "language": None,

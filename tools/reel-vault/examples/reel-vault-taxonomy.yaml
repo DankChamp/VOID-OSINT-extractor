@@ -1,0 +1,212 @@
+# Copy this file to the workspace root as `reel-vault-taxonomy.yaml`, or point
+# `taxonomy_file` at it. Category names are the source of truth: the classifier must
+# use them exactly. Renaming or adding categories never requires code changes.
+categories:
+  - name: psychology & mind
+    description: Emotional, reflective, relationship and comfort posts.
+    keywords:
+      - sad
+      - emo
+      - depressed
+      - depression
+      - cuddle
+      - cuddling
+      - love
+      - heartbreak
+      - loneliness
+      - comfort
+      - nostalgia
+    example_captions:
+      - "feeling sad and lonely tonight"
+      - "this breakup destroyed me"
+    collections:
+      - psychology & mind
+      - Psych
+
+  - name: learning & study tricks
+    description: Tutorials, study methods, frameworks and actionable how-to advice.
+    keywords:
+      - how to
+      - step
+      - trick
+      - hack
+      - tutorial
+      - guide
+      - study
+      - learn
+    example_captions:
+      - "how to focus while studying"
+      - "3 tricks to remember anything"
+    collections:
+      - Learning
+      - learning & study tricks
+
+  - name: news & information
+    description: Breaking news, reports, research and sourced claims.
+    keywords:
+      - breaking
+      - report
+      - study
+      - research
+      - source
+      - study shows
+    example_captions:
+      - "breaking: a new study reports"
+      - "researchers found that"
+    collections:
+      - News
+
+  - name: comedy & funny
+    description: Humor, memes, sketches and entertainment.
+    keywords:
+      - funny
+      - meme
+      - hilarious
+      - comedy
+      - laugh
+    example_captions:
+      - "this had me dead"
+      - "why is this so funny"
+    collections:
+      - Funny
+
+  - name: tech & AI
+    description: Technology, AI, software, gadgets and coding.
+    keywords:
+      - ai
+      - python
+      - code
+      - software
+      - gadget
+      - phone
+      - app
+    example_captions:
+      - "this AI tool is wild"
+      - "python trick you need"
+    collections:
+      - Tech
+
+  - name: money & business
+    description: Finance, investing, side hustles and career advice.
+    keywords:
+      - money
+      - invest
+      - side hustle
+      - business
+      - salary
+      - budget
+    example_captions:
+      - "how I make $5k/month"
+      - "investing for beginners"
+    collections:
+      - Money
+
+  - name: health & fitness
+    description: Workouts, nutrition, wellness and medical info.
+    keywords:
+      - workout
+      - gym
+      - fitness
+      - health
+      - nutrition
+      - diet
+      - sleep
+    example_captions:
+      - "morning workout routine"
+      - "best foods for energy"
+    collections:
+      - Health
+
+  - name: food & recipes
+    description: Cooking, recipes, ingredients and food tips.
+    keywords:
+      - recipe
+      - cook
+      - ingredient
+      - food
+      - bake
+    example_captions:
+      - "5 ingredient pasta"
+      - "easy dinner idea"
+    collections:
+      - Food
+
+  - name: travel & places
+    description: Trips, destinations, hotels and travel guides.
+    keywords:
+      - travel
+      - trip
+      - destination
+      - hotel
+      - flight
+      - vacation
+    example_captions:
+      - "things to do in Tokyo"
+      - "best hotels in Paris"
+    collections:
+      - Travel
+
+  - name: style & design
+    description: Fashion, interiors, aesthetics and design.
+    keywords:
+      - fashion
+      - outfit
+      - style
+      - design
+      - aesthetic
+      - decor
+    example_captions:
+      - "outfit of the day"
+      - "bedroom makeover"
+    collections:
+      - Style
+
+  - name: life hacks & DIY
+    description: Home hacks, DIY projects and everyday tips.
+    keywords:
+      - diy
+      - hack
+      - home
+      - tip
+      - trick
+      - project
+    example_captions:
+      - "kitchen hack that works"
+      - "diy shelf tutorial"
+    collections:
+      - DIY
+
+  - name: tools & resources
+    description: Websites, apps, products and resources worth bookmarking.
+    keywords:
+      - tool
+      - website
+      - resource
+      - app
+      - free
+      - link
+    example_captions:
+      - "useful website for students"
+      - "best free tool"
+    collections:
+      - Tools
+
+  - name: inspiration & motivation
+    description: Motivational quotes, mindset and inspirational content.
+    keywords:
+      - motivation
+      - inspire
+      - mindset
+      - quote
+      - success
+    example_captions:
+      - "stay motivated"
+      - "mindset shift"
+    collections:
+      - Inspiration
+
+  - name: other
+    description: Anything that does not fit the categories above.
+    keywords: []
+    example_captions: []
+    collections: []
