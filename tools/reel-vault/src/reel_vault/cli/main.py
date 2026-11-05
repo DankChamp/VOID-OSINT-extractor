@@ -269,6 +269,49 @@ def stats(ctx: typer.Context) -> None:
     console.print_json(json.dumps(data, indent=2))
 
 
+# --------------------------------------------------------------------------- enrichment
+
+
+@app.command("fetch")
+def fetch_metadata(
+    ctx: typer.Context,
+    limit: Annotated[int | None, typer.Option("--limit", help="Fetch at most N reels.")] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Refetch reels that already succeeded.")
+    ] = False,
+    shortcode: Annotated[
+        str | None, typer.Option("--shortcode", help="Fetch one specific reel.")
+    ] = None,
+    delay: Annotated[
+        float | None,
+        typer.Option("--delay", help="Override the delay between requests, in seconds."),
+    ] = None,
+) -> None:
+    """Fetch public metadata and thumbnails anonymously."""
+    from reel_vault.enrich.service import EnrichmentService
+
+    context = context_from_typer(ctx)
+    with context.store() as store:
+        if shortcode is not None and store.get_reel(shortcode) is None:
+            err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
+            raise typer.Exit(code=EXIT_ERROR)
+        service = EnrichmentService(store, context.paths, context.config, request_delay=delay)
+        summary = service.fetch_pending(
+            limit=limit,
+            force=force,
+            shortcodes=[shortcode] if shortcode else None,
+        )
+
+    console.print(
+        f"[green]fetched[/green] {summary.ok} ok, "
+        f"{summary.unavailable} unavailable, {summary.failed} failed, "
+        f"{summary.skipped} skipped"
+    )
+    if summary.statuses:
+        for status, count in sorted(summary.statuses.items()):
+            console.print(f"  {status}: {count}")
+
+
 # --------------------------------------------------------------------------- pipeline
 
 

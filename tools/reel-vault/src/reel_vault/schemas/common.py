@@ -25,6 +25,7 @@ class ReelStatus(StrEnum):
     DONE = "done"
     STUB = "stub"
     UNAVAILABLE = "unavailable"
+    RATE_LIMITED = "rate_limited"
     FAILED = "failed"
 
 

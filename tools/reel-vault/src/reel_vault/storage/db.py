@@ -273,6 +273,39 @@ class Store:
                 "UPDATE reels SET status = ? WHERE shortcode = ?", (value, shortcode)
             )
 
+    def update_reel_enrichment(
+        self,
+        shortcode: str,
+        *,
+        author: str | None = None,
+        caption: str | None = None,
+        media_type: str | None = None,
+        hashtags: list[str] | None = None,
+    ) -> None:
+        """Fill in fields the export omitted without overwriting better values."""
+        row = self._conn.execute(
+            "SELECT author, caption, media_type, hashtags FROM reels WHERE shortcode = ?",
+            (shortcode,),
+        ).fetchone()
+        if row is None:
+            return
+        merged_hashtags = sorted(set(json.loads(row["hashtags"] or "[]")) | set(hashtags or []))
+        with self._conn:
+            self._conn.execute(
+                """
+                UPDATE reels
+                   SET author = ?, caption = ?, media_type = ?, hashtags = ?
+                 WHERE shortcode = ?
+                """,
+                (
+                    author if author is not None else row["author"],
+                    caption if caption is not None else row["caption"],
+                    media_type or row["media_type"],
+                    json.dumps(merged_hashtags),
+                    shortcode,
+                ),
+            )
+
     # -------------------------------------------------------------------------- jobs
 
     def set_job(

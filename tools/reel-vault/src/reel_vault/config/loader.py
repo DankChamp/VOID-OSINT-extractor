@@ -39,6 +39,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "keep_keyframes": True,
         "verify": True,
     },
+    "enrich": {
+        "retries": 2,
+        "backoff_seconds": 5.0,
+        "timeout_seconds": 30.0,
+        "thumbnails": True,
+        "max_media_items": 50,
+    },
     "run": {
         "unattended": False,
         "max_hours": 0.0,

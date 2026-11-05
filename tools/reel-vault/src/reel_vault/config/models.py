@@ -37,6 +37,14 @@ class RunConfig(_Model):
     rate_limit_cooldown_minutes: int = Field(default=30, ge=0)
 
 
+class EnrichConfig(_Model):
+    retries: int = Field(default=2, ge=0, le=10)
+    backoff_seconds: float = Field(default=5.0, ge=0.0)
+    timeout_seconds: float = Field(default=30.0, gt=0.0)
+    thumbnails: bool = True
+    max_media_items: int = Field(default=50, ge=1, le=500)
+
+
 class GroqConfig(_Model):
     api_key_env: str = "GROQ_API_KEY"
     base_url: str = "https://api.groq.com/openai/v1"
@@ -68,6 +76,7 @@ class AppConfig(_Model):
     db_path: Path
     media_dir: Path
     download: DownloadConfig = Field(default_factory=DownloadConfig)
+    enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     groq: GroqConfig = Field(default_factory=GroqConfig)
     triage: TriageConfig = Field(default_factory=TriageConfig)
@@ -87,6 +96,7 @@ __all__ = [
     "AppConfig",
     "DownloadConfig",
     "DownloadMode",
+    "EnrichConfig",
     "FallbackDepth",
     "GroqConfig",
     "OcrConfig",
