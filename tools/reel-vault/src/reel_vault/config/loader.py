@@ -38,6 +38,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "keep_audio": True,
         "keep_keyframes": True,
         "verify": True,
+        "retries": 1,
+        "drive_wait_seconds": 60.0,
     },
     "enrich": {
         "retries": 2,

@@ -30,9 +30,10 @@ def build_context(
     config_path: Path | None = None,
     verbose: bool = False,
     quiet: bool = False,
+    overrides: dict[str, Any] | None = None,
 ) -> AppContext:
     load_env_file()
-    config = load_config(explicit_path=config_path)
+    config = load_config(explicit_path=config_path, overrides=overrides)
     paths = WorkspacePaths(config.data_dir, config.db_path, config.media_dir).ensure()
     level = "DEBUG" if verbose else config.log_level
     setup_logging(level=level, log_file=paths.logs / "reel-vault.log", quiet=quiet)
@@ -46,6 +47,7 @@ def context_from_typer(ctx: typer.Context) -> AppContext:
             config_path=data.get("config"),
             verbose=bool(data.get("verbose")),
             quiet=bool(data.get("quiet")),
+            overrides=data.get("overrides"),
         )
     except ConfigError as exc:
         typer.echo(f"configuration error: {exc}", err=True)

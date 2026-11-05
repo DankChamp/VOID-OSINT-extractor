@@ -26,6 +26,8 @@ class DownloadConfig(_Model):
     keep_audio: bool = True
     keep_keyframes: bool = True
     verify: bool = True
+    retries: int = Field(default=1, ge=0, le=5)
+    drive_wait_seconds: float = Field(default=60.0, ge=0.0)
 
 
 class RunConfig(_Model):

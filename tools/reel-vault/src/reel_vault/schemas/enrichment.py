@@ -62,6 +62,7 @@ class EnrichmentResult(BaseModel):
     extractor: str | None = None
     webpage_url: str | None = None
     is_carousel: bool = False
+    item_count: int = 1
     error: str | None = None
     thumbnail_path: str | None = None
     fetched_at: str = Field(default_factory=iso_now)

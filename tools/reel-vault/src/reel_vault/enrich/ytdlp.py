@@ -150,6 +150,7 @@ def normalise_info(
         extractor=_as_text(info.get("extractor_key")) or _as_text(info.get("extractor")),
         webpage_url=_as_text(info.get("webpage_url")) or url,
         is_carousel=is_carousel,
+        item_count=len(entries) if isinstance(entries, list) and entries else 1,
     )
 
 

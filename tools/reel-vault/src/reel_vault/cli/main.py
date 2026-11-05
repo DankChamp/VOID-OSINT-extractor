@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 from rich.console import Console
@@ -58,10 +58,34 @@ def main_callback(
         Path | None,
         typer.Option("--config", "-c", help="Path to a configuration file.", show_default=False),
     ] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option("--data-dir", help="Override the artifact directory.", show_default=False),
+    ] = None,
+    db_path: Annotated[
+        Path | None,
+        typer.Option("--db-path", help="Override the SQLite database.", show_default=False),
+    ] = None,
+    media_dir: Annotated[
+        Path | None,
+        typer.Option("--media-dir", help="Override the media directory.", show_default=False),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable debug logging.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress console logging.")] = False,
 ) -> None:
-    ctx.obj = {"config": config, "verbose": verbose, "quiet": quiet}
+    overrides: dict[str, Any] = {}
+    if data_dir is not None:
+        overrides["data_dir"] = data_dir
+    if db_path is not None:
+        overrides["db_path"] = db_path
+    if media_dir is not None:
+        overrides["media_dir"] = media_dir
+    ctx.obj = {
+        "config": config,
+        "overrides": overrides,
+        "verbose": verbose,
+        "quiet": quiet,
+    }
 
 
 # --------------------------------------------------------------------------- config
@@ -152,6 +176,12 @@ def doctor(ctx: typer.Context) -> None:
     if config.media_dir.exists():
         usage = shutil.disk_usage(config.media_dir)
         table.add_row("media free", f"{_human_bytes(usage.free)} of {_human_bytes(usage.total)}")
+        from reel_vault.media.drive import check_reachable
+
+        table.add_row(
+            "media writable",
+            "yes" if check_reachable(config.media_dir) else "[red]no[/red]",
+        )
     else:
         table.add_row("media dir", "[red]not reachable[/red]")
 
@@ -310,6 +340,72 @@ def fetch_metadata(
     if summary.statuses:
         for status, count in sorted(summary.statuses.items()):
             console.print(f"  {status}: {count}")
+
+
+# --------------------------------------------------------------------------- media
+
+
+@app.command("download")
+def download_media(
+    ctx: typer.Context,
+    mode: Annotated[
+        str | None,
+        typer.Option("--mode", help="none | archive | all (default: configuration)."),
+    ] = None,
+    quality: Annotated[
+        str | None,
+        typer.Option("--quality", help="best | 1080 | 720 (default: configuration)."),
+    ] = None,
+    limit: Annotated[int | None, typer.Option("--limit", help="Download at most N reels.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-download existing media.")] = False,
+    shortcode: Annotated[
+        str | None, typer.Option("--shortcode", help="Download one specific reel.")
+    ] = None,
+) -> None:
+    """Download and verify media for eligible reels."""
+    from reel_vault.config.models import DownloadMode, Quality
+    from reel_vault.media.base import DriveUnavailable
+    from reel_vault.media.service import MediaService
+
+    context = context_from_typer(ctx)
+    selected_mode = mode or context.config.download.mode
+    selected_quality = quality or context.config.download.quality
+    if selected_mode not in {"none", "archive", "all"}:
+        err_console.print(f"[red]invalid --mode:[/red] {selected_mode}")
+        raise typer.Exit(code=EXIT_CONFIG)
+    if selected_quality not in {"best", "1080", "720"}:
+        err_console.print(f"[red]invalid --quality:[/red] {selected_quality}")
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    with context.store() as store:
+        if shortcode is not None and store.get_reel(shortcode) is None:
+            err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
+            raise typer.Exit(code=EXIT_ERROR)
+        service = MediaService(store, context.paths, context.config)
+        try:
+            summary = service.download_pending(
+                mode=cast(DownloadMode, selected_mode),
+                quality=cast(Quality, selected_quality),
+                limit=limit,
+                force=force,
+                shortcodes=[shortcode] if shortcode else None,
+            )
+        except DriveUnavailable as exc:
+            err_console.print(f"[red]media drive unavailable:[/red] {exc}")
+            raise typer.Exit(code=EXIT_DRIVE_LOST) from exc
+
+    console.print(
+        f"[green]media[/green] {summary.downloaded} downloaded, "
+        f"{summary.skipped} skipped, {summary.failed} failed, "
+        f"{_human_bytes(summary.bytes)}"
+    )
+    for code, reason in sorted(summary.failures.items()):
+        console.print(f"  [yellow]{code}[/yellow]: {reason}")
+    if selected_mode == "archive" and summary.downloaded == 0 and summary.skipped:
+        console.print(
+            "[dim]archive mode downloads only posts triaged as archive; "
+            "run `reel-vault run` or use --mode all.[/dim]"
+        )
 
 
 # --------------------------------------------------------------------------- pipeline
