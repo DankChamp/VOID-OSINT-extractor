@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from reel_vault.schemas.common import Decision, iso_now
 from reel_vault.schemas.triage import ExtractionField
 
-LinkStatus = Literal["ok", "redirected", "unreachable", "blocked", "invalid", "error"]
+LinkStatus = Literal["ok", "redirected", "unreachable", "blocked", "invalid", "error", "skipped"]
 
 
 class ExtractionMethod(StrEnum):

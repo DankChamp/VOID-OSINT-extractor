@@ -546,6 +546,71 @@ def triage(
         raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
 
 
+# --------------------------------------------------------------------------- extract
+
+
+@app.command()
+def extract(
+    ctx: typer.Context,
+    limit: Annotated[int | None, typer.Option("--limit", help="Extract at most N reels.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-extract finished reels.")] = False,
+    shortcode: Annotated[
+        str | None, typer.Option("--shortcode", help="Extract one specific reel.")
+    ] = None,
+    model: Annotated[
+        str | None, typer.Option("--model", help="Override the extraction model.")
+    ] = None,
+) -> None:
+    """Run grounded field extraction for triaged reels."""
+    from reel_vault.extract.service import ExtractionService
+
+    context = context_from_typer(ctx)
+    if not os.environ.get(context.config.groq.api_key_env):
+        err_console.print(
+            f"[red]extract unavailable:[/red] {context.config.groq.api_key_env} is not set"
+        )
+        raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
+
+    with context.store() as store:
+        if shortcode is not None and store.get_reel(shortcode) is None:
+            err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
+            raise typer.Exit(code=EXIT_ERROR)
+        service = ExtractionService(store, context.paths, context.config, model=model)
+        summary = service.extract_pending(
+            limit=limit,
+            force=force,
+            shortcodes=[shortcode] if shortcode else None,
+        )
+
+    table = Table(title="extraction results")
+    table.add_column("shortcode")
+    table.add_column("decision")
+    table.add_column("method")
+    table.add_column("items", justify="right")
+    table.add_column("links", justify="right")
+    table.add_column("keyframes", justify="right")
+    for result in summary.results:
+        table.add_row(
+            result.shortcode,
+            result.decision.value,
+            result.method.value,
+            str(len(result.items)),
+            str(len(result.links)),
+            str(len(result.keyframes)),
+        )
+    console.print(table)
+
+    console.print(
+        f"[green]extracted[/green] {summary.extracted} extract, "
+        f"{summary.archived} archive, {summary.stubbed} stub, "
+        f"{summary.failed} failed"
+    )
+    if summary.cost_usd:
+        console.print(f"  estimated cost: ${summary.cost_usd:.4f}")
+    for code, reason in sorted(summary.failures.items()):
+        console.print(f"  [yellow]{code}[/yellow]: {reason}")
+
+
 # --------------------------------------------------------------------------- pipeline
 
 
