@@ -62,11 +62,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "triage_model": "openai/gpt-oss-120b",
         "extraction_model": "openai/gpt-oss-120b",
         "whisper_model": "whisper-large-v3-turbo",
+        "whisper_cost_per_hour": 0.04,
+        "retry_backoff_seconds": 5.0,
         "timeout_seconds": 120.0,
         "max_retries": 4,
     },
     "triage": {"extract_threshold": 40, "needs_review_threshold": 60, "fallback": "standard"},
-    "transcription": {"enabled": True, "language": None},
+    "transcription": {
+        "enabled": True,
+        "language": None,
+        "chunk_seconds": 300,
+        "max_chunk_bytes": 24 * 1024 * 1024,
+    },
     "ocr": {"enabled": True, "max_keyframes": 6},
 }
 

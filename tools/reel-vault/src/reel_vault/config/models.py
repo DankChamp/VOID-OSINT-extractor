@@ -53,6 +53,8 @@ class GroqConfig(_Model):
     triage_model: str = "openai/gpt-oss-120b"
     extraction_model: str = "openai/gpt-oss-120b"
     whisper_model: str = "whisper-large-v3-turbo"
+    whisper_cost_per_hour: float = Field(default=0.04, ge=0.0)
+    retry_backoff_seconds: float = Field(default=5.0, ge=0.0)
     timeout_seconds: float = 120.0
     max_retries: int = Field(default=4, ge=0, le=10)
 
@@ -66,6 +68,8 @@ class TriageConfig(_Model):
 class TranscriptionConfig(_Model):
     enabled: bool = True
     language: str | None = None
+    chunk_seconds: int = Field(default=300, ge=10, le=3600)
+    max_chunk_bytes: int = Field(default=24 * 1024 * 1024, ge=1024 * 1024)
 
 
 class OcrConfig(_Model):

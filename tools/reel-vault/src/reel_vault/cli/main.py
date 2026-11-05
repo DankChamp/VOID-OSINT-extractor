@@ -408,6 +408,67 @@ def download_media(
         )
 
 
+# --------------------------------------------------------------------------- transcription
+
+
+@app.command()
+def transcribe(
+    ctx: typer.Context,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Transcribe at most N reels.")
+    ] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-transcribe finished reels.")] = False,
+    shortcode: Annotated[
+        str | None, typer.Option("--shortcode", help="Transcribe one specific reel.")
+    ] = None,
+    model: Annotated[
+        str | None, typer.Option("--model", help="Override the Whisper model.")
+    ] = None,
+    language: Annotated[
+        str | None, typer.Option("--language", help="Force a language code, e.g. en.")
+    ] = None,
+) -> None:
+    """Extract audio and transcribe it with Groq Whisper."""
+    from reel_vault.transcribe.service import TranscriptionService
+
+    context = context_from_typer(ctx)
+    if not os.environ.get(context.config.groq.api_key_env):
+        err_console.print(
+            f"[red]transcription unavailable:[/red] {context.config.groq.api_key_env} is not set"
+        )
+        raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
+
+    with context.store() as store:
+        if shortcode is not None and store.get_reel(shortcode) is None:
+            err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
+            raise typer.Exit(code=EXIT_ERROR)
+        service = TranscriptionService(
+            store,
+            context.paths,
+            context.config,
+            model=model,
+            language=language,
+        )
+        summary = service.transcribe_pending(
+            limit=limit,
+            force=force,
+            shortcodes=[shortcode] if shortcode else None,
+        )
+
+    console.print(
+        f"[green]transcribed[/green] {summary.transcribed}, "
+        f"{summary.no_audio} without audio, {summary.failed} failed, "
+        f"{summary.skipped} skipped"
+    )
+    console.print(
+        f"  audio: {summary.audio_seconds / 60:.1f} min, estimated cost: ${summary.cost_usd:.4f}"
+    )
+    for code, reason in sorted(summary.failures.items()):
+        console.print(f"  [yellow]{code}[/yellow]: {reason}")
+    if summary.failed and not summary.transcribed:
+        raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
+
+
 # --------------------------------------------------------------------------- pipeline
 
 

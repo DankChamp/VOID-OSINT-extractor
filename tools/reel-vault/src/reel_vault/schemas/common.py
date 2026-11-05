@@ -27,6 +27,7 @@ class ReelStatus(StrEnum):
     UNAVAILABLE = "unavailable"
     RATE_LIMITED = "rate_limited"
     MEDIA_FAILED = "media_failed"
+    TRANSCRIPT_FAILED = "transcript_failed"
     FAILED = "failed"
 
 
