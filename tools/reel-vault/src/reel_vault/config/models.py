@@ -80,12 +80,21 @@ class OcrConfig(_Model):
     max_keyframes: int = Field(default=6, ge=1, le=30)
 
 
+class ExtractConfig(_Model):
+    max_items: int = Field(default=60, ge=1, le=500)
+    max_links: int = Field(default=12, ge=1, le=100)
+    resolve_links: bool = True
+    link_timeout_seconds: float = Field(default=10.0, gt=0.0)
+    scene_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+
+
 class AppConfig(_Model):
     data_dir: Path
     db_path: Path
     media_dir: Path
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
+    extract: ExtractConfig = Field(default_factory=ExtractConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     groq: GroqConfig = Field(default_factory=GroqConfig)
     triage: TriageConfig = Field(default_factory=TriageConfig)
@@ -106,6 +115,7 @@ __all__ = [
     "DownloadConfig",
     "DownloadMode",
     "EnrichConfig",
+    "ExtractConfig",
     "FallbackDepth",
     "GroqConfig",
     "OcrConfig",

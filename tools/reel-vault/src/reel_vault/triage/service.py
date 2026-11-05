@@ -106,7 +106,10 @@ _FIELD_ALIASES: dict[str, str] = {
     "person": ExtractionField.PEOPLE.value,
     "book": ExtractionField.BOOKS.value,
     "place": ExtractionField.PLACES.value,
+    "product": ExtractionField.PRODUCTS.value,
     "snippet": ExtractionField.CODE.value,
+    "note": ExtractionField.NOTES.value,
+    "summary": ExtractionField.NOTES.value,
 }
 _DECISION_ALIASES: dict[str, str] = {
     "keep": Decision.ARCHIVE.value,

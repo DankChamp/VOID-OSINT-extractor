@@ -27,7 +27,7 @@ Return exactly one JSON object, with no markdown and no commentary, using this s
   "actions": ["transcript" | "ocr" | "keyframes" | "links" | "download_media"],
   "fields": [
     "steps" | "tricks" | "tools" | "links" | "claims" | "quotes" | "recipes" |
-    "people" | "books" | "places" | "code"
+    "people" | "books" | "places" | "products" | "code" | "notes"
   ],
   "categories": [{"name": "short topic name", "confidence": 0.0-1.0}],
   "archive_reason": null or "why the whole post is worth keeping"

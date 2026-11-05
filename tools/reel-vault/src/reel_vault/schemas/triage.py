@@ -48,7 +48,9 @@ class ExtractionField(StrEnum):
     PEOPLE = "people"
     BOOKS = "books"
     PLACES = "places"
+    PRODUCTS = "products"
     CODE = "code"
+    NOTES = "notes"
 
 
 class TriageMethod(StrEnum):
