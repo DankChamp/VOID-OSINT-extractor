@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from reel_vault.review.tui import ReviewApp, ReviewScreen, run_review
+from reel_vault.review.tui import OSINTApp, run_tui
 
-__all__ = ["ReviewApp", "ReviewScreen", "run_review"]
+__all__ = ["OSINTApp", "run_tui"]

@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 from reel_vault.config.loader import load_config
 from reel_vault.importer import ImportReport
-from reel_vault.outputs.dashboard import render_dashboard_html
 from reel_vault.outputs.index import render_category_index, render_stubs
 from reel_vault.outputs.knowledge import render_knowledge_json
 from reel_vault.outputs.markdown import render_reel_markdown
@@ -126,9 +125,9 @@ def _seed_full(
 def test_supported_formats() -> None:
     assert "md" in SUPPORTED_FORMATS
     assert "json" in SUPPORTED_FORMATS
-    assert "html" in SUPPORTED_FORMATS
     assert "pdf" in SUPPORTED_FORMATS
     assert "obsidian" in SUPPORTED_FORMATS
+    assert "html" not in SUPPORTED_FORMATS
 
 
 def test_render_reel_markdown(tmp_path: Path) -> None:
@@ -181,17 +180,6 @@ def test_render_knowledge_json(tmp_path: Path) -> None:
     assert data["items"][0]["shortcode"] == "AAA111"
 
 
-def test_render_dashboard_html(tmp_path: Path) -> None:
-    store, paths, _config = _workspace(tmp_path, ["AAA111"])
-    _seed_full(store, "AAA111")
-
-    result = render_dashboard_html(store, paths)
-    assert result.is_file()
-    content = result.read_text(encoding="utf-8")
-    assert "reel-vault dashboard" in content
-    assert "AAA111" in content
-
-
 def test_render_pdf(tmp_path: Path) -> None:
     store, paths, _config = _workspace(tmp_path, ["AAA111"])
     _seed_full(store, "AAA111")
@@ -218,14 +206,13 @@ def test_export_all(tmp_path: Path) -> None:
     from reel_vault.cli.context import AppContext
 
     context = AppContext(config=_config, paths=paths)
-    code = export_all(context, formats="md,json,html,pdf,obsidian")
+    code = export_all(context, formats="md,json,pdf,obsidian")
     assert code == 0
 
     outputs_dir = paths.outputs
     assert (outputs_dir / "category-index.md").is_file()
     assert (outputs_dir / "stubs.md").is_file()
     assert (outputs_dir / "knowledge.json").is_file()
-    assert (outputs_dir / "dashboard.html").is_file()
     assert (outputs_dir / "reel-vault.pdf").is_file()
     assert (outputs_dir / "obsidian").is_dir()
 

@@ -680,10 +680,10 @@ def export(
 @app.command()
 def review(ctx: typer.Context) -> None:
     """Open the interactive review queue."""
-    from reel_vault.review.tui import run_review
+    from reel_vault.review.tui import run_tui
 
     context = context_from_typer(ctx)
-    raise typer.Exit(code=run_review(context))
+    raise typer.Exit(code=run_tui(context))
 
 
 @app.command()

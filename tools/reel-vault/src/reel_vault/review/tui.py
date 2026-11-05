@@ -1,430 +1,627 @@
-"""Interactive review queue — a fully offline Textual TUI.
+"""``OSINT`` — the full interactive TUI for reel-vault.
 
-Left pane: filtered reel list (shortcode, score, category, status, decision).
-Right pane: caption, transcript excerpt, triage reason, extracted items, links.
+A single Textual application that covers every stage of the pipeline:
 
-Keys:
-  a  approve        mark the selected reel as reviewed
-  r  reclassify     pick primary + secondary categories (multi-select)
-  f  force          change the triage decision (archive / extract / stub)
-  n  note           add a free-text note
-  o  open           open the reel URL in the default browser
-  /  search         filter the reel list by shortcode, author or caption
-  q  quit           leave the TUI
+* Import an official Instagram export
+* Run fetch / transcribe / triage / extract / classify / media
+* Review and correct reels (approve, reclassify, force decision, add note, open URL)
+* Export documents (Markdown, JSON, PDF, Obsidian)
+* Inspect configuration and run the doctor check
 
-Every action writes to ``review.json`` so the TUI never needs a model call
-to correct a label.
+Everything is offline and local-first.
 """
 
 from __future__ import annotations
 
-import json
+import datetime
 import webbrowser
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from rich.text import Text  # noqa: F401
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import (
     Button,
     DataTable,
+    Footer,
+    Header,
     Input,
     Label,
     Select,
     Static,
+    TabbedContent,
+    TabPane,
 )
 
-from reel_vault.cli.context import AppContext
+from reel_vault.cli.context import AppContext, build_context
+from reel_vault.importer import parse_export
+from reel_vault.media.base import DriveUnavailable
+from reel_vault.outputs.render import SUPPORTED_FORMATS, export_all
+from reel_vault.pipeline.runner import RunOptions, run_pipeline
 from reel_vault.storage.db import Store
-from reel_vault.storage.paths import WorkspacePaths
+from reel_vault.storage.io import write_json_atomic
 
-REVIEW_FILTERS: tuple[str, ...] = ("all", "needs_review", "low_value", "failed", "archive")
-QUEUE_COLUMNS = ("shortcode", "score", "category", "status", "decision", "caption")
+APP_CSS = """
+Screen {
+    layout: vertical;
+    background: #0f172a;
+}
+
+#title {
+    dock: top;
+    height: 3;
+    background: #1e293b;
+    color: #f8fafc;
+    text-style: bold;
+    text-align: center;
+    content-align: center middle;
+    padding: 1;
+}
+
+#subtitle {
+    dock: top;
+    height: 1;
+    background: #0f172a;
+    color: #64748b;
+    text-align: center;
+}
+
+#main {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#stats {
+    height: 8;
+    border: solid #334155;
+    margin: 0 1;
+    padding: 1;
+    background: #1e293b;
+}
+
+.stat-row {
+    height: 1;
+    color: #cbd5e1;
+}
+
+#log {
+    height: 1fr;
+    border: solid #334155;
+    margin: 0 1;
+    padding: 1;
+    background: #0f172a;
+    color: #cbd5e1;
+    overflow-y: auto;
+}
+
+#action-bar {
+    dock: bottom;
+    height: 3;
+    background: #1e293b;
+    color: #cbd5e1;
+    padding: 0 2;
+    text-align: center;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+.tab-pane {
+    height: 1fr;
+    padding: 1;
+}
+
+.dialog {
+    align: center middle;
+}
+
+.dialog #panel {
+    width: 60;
+    height: 18;
+    border: solid #334155;
+    padding: 1;
+    background: #1e293b;
+    layout: vertical;
+}
+
+.button-row {
+    height: 3;
+    margin: 1 0;
+    align: center middle;
+}
+"""
+
+KEY_HINT_TEXT = (
+    "[b]1[/b] Import  [b]2[/b] Run Pipeline  [b]3[/b] Review  [b]4[/b] Export  "
+    "[b]5[/b] Config  [b]6[/b] Doctor  [b]q[/b] Quit"
+)
 
 
-@dataclass
-class ReelSummary:
-    shortcode: str
-    score: int
-    category: str
-    status: str
-    decision: str
-    caption: str
-    url: str
+class OSINTApp(App[None]):
+    """The full reel-vault TUI."""
 
-
-class ReviewScreen(Screen[None]):
-    """The main review screen."""
-
-    CSS = """
-    Screen {
-        layout: horizontal;
-    }
-
-    #sidebar {
-        width: 40;
-        border: solid $primary;
-        padding: 1;
-        layout: vertical;
-    }
-
-    #details {
-        width: 1fr;
-        border: solid $secondary;
-        padding: 1;
-        layout: vertical;
-    }
-
-    #reel-table {
-        height: 1fr;
-    }
-
-    #filter-select {
-        margin-bottom: 1;
-    }
-
-    #search-input {
-        margin-bottom: 1;
-    }
-
-    #detail-scroll {
-        height: 1fr;
-        overflow-y: auto;
-    }
-
-    .detail-label {
-        text-style: bold;
-        color: $text-muted;
-    }
-
-    .detail-value {
-        margin-bottom: 1;
-    }
-
-    .key-hint {
-        color: $text-muted;
-        text-style: italic;
-    }
-
-    #status-line {
-        dock: bottom;
-        height: 3;
-        layout: horizontal;
-        padding: 0 1;
-    }
-    """
-
-    BINDINGS = [  # noqa: RUF012 - Textual requires BINDINGS as a class attribute list
-        ("a", "approve", "Approve"),
-        ("r", "reclassify", "Reclassify"),
-        ("f", "force", "Force decision"),
-        ("n", "note", "Add note"),
-        ("o", "open", "Open URL"),
-        ("/", "search_focus", "Search"),
-        ("q", "quit", "Quit"),
-    ]
+    CSS = APP_CSS
+    TITLE = "reel-vault — OSINT archive"
 
     def __init__(self, context: AppContext) -> None:
         super().__init__()
         self.context = context
-        self.paths: WorkspacePaths = context.paths
+        self.paths = context.paths
         self.config = context.config
         self.store: Store = context.store()
-        self.reels: list[ReelSummary] = []
-        self.selected_index: int | None = None
-        self.filter_value: str = "all"
-        self.search_text: str = ""
-
-    # ------------------------------------------------------------------ compose
+        self._selected_row_key: str | None = None
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            with Vertical(id="sidebar"):
-                yield Label("Reel queue")
-                yield Select(
-                    options=[(f.title(), f) for f in REVIEW_FILTERS],
-                    value="all",
-                    id="filter-select",
-                )
-                yield Input(placeholder="Search shortcode, author, caption…", id="search-input")
-                yield DataTable(id="reel-table", zebra_stripes=True, cursor_type="row")
-                yield Static("", id="hint")
-            with Vertical(id="details"):
-                yield Static("Select a reel to review", id="detail-header")
-                yield VerticalScroll(id="detail-scroll")
-        yield Static(
-            "a=approve  r=reclassify  f=force  n=note  o=open  /=search  q=quit",
-            id="status-line",
-        )
+        yield Header(show_clock=True)
+        yield Label("reel-vault", id="title")
+        yield Label("Official Instagram export → classified, archived reel library", id="subtitle")
+        with Vertical(id="main"):
+            yield self._stats_panel()
+            yield TabbedContent(id="tabs")
+            yield TabPane("Queue", id="tab-queue")
+            yield TabPane("Review", id="tab-review")
+            yield TabPane("Export", id="tab-export")
+            yield TabPane("Config", id="tab-config")
+            yield TabPane("Doctor", id="tab-doctor")
+            yield VerticalScroll(id="log")
+        yield Static(KEY_HINT_TEXT, id="action-bar")
+        yield Footer()
+
+    def _stats_panel(self) -> Vertical:
+        panel = Vertical(id="stats")
+        panel.mount(Label("Library stats", classes="card-title"))
+        self._stats_total = Label("Total reels: 0")
+        self._stats_by_status = Label("By status: —")
+        self._stats_cost = Label("Estimated cost: $0.0000")
+        panel.mount(self._stats_total)
+        panel.mount(self._stats_by_status)
+        panel.mount(self._stats_cost)
+        return panel
 
     def on_mount(self) -> None:
-        table = self.query_one("#reel-table", DataTable)
-        for col in QUEUE_COLUMNS:
-            table.add_column(col, key=col)
-        self._load_reels()
-        self._refresh_hint()
+        self._refresh_stats()
+        self._load_queue()
+        self._load_review()
+        self._load_config()
+        self._load_doctor()
 
-    # ------------------------------------------------------------------ data loading
+    # ------------------------------------------------------------------ stats
 
-    def _load_reels(self) -> None:
-        self.reels = []
+    def _refresh_stats(self) -> None:
         with self.store as store:
-            rows = store.list_reels(limit=1000)
-            for row in rows:
-                classification = store.get_classification(row["shortcode"])
-                triage = store.get_triage(row["shortcode"])
-                self.reels.append(
-                    ReelSummary(
-                        shortcode=str(row["shortcode"]),
-                        score=int((triage or {}).get("value_score", 0) or 0),
-                        category=(classification or {}).get("primary") or "-",
-                        status=str(row["status"]),
-                        decision=str((triage or {}).get("decision") or "-"),
-                        caption=str(row["caption"] or "")[:80],
-                        url=str(row["url"]),
-                    )
-                )
-        self._apply_filter_and_search()
-        self._populate_table()
+            stats = store.stats()
+        total = stats.get("reels", 0)
+        by_status = stats.get("by_status", {})
+        status_str = ", ".join(f"{k}: {v}" for k, v in sorted(by_status.items())) or "—"
+        self._stats_total.update(f"Total reels: {total}")
+        self._stats_by_status.update(f"By status: {status_str}")
+        self._stats_cost.update(f"Estimated cost: ${stats.get('cost_usd', 0.0):.4f}")
 
-    def _apply_filter_and_search(self) -> None:
-        text = self.search_text.casefold()
-        filtered: list[ReelSummary] = []
-        for reel in self.reels:
-            if self.filter_value != "all":
-                if self.filter_value == "needs_review":
-                    triage = self.store.get_triage(reel.shortcode)
-                    if not (triage or {}).get("needs_review"):
-                        continue
-                elif self.filter_value == "low_value":
-                    if reel.decision not in {"stub", "-"}:
-                        continue
-                elif self.filter_value == "failed":
-                    if reel.status not in {
-                        "failed",
-                        "triage_failed",
-                        "extraction_failed",
-                        "classification_failed",
-                        "transcript_failed",
-                        "media_failed",
-                    }:
-                        continue
-                elif self.filter_value == "archive":
-                    if reel.decision != "archive":
-                        continue
-            if (
-                text
-                and text not in reel.shortcode.casefold()
-                and text not in reel.caption.casefold()
-                and text not in reel.category.casefold()
-            ):
-                continue
-            filtered.append(reel)
-        filtered.sort(key=lambda r: (r.decision != "archive", -r.score))
-        self.reels = filtered
+    def _write_log(self, message: str) -> None:
+        log = self.query_one("#log", VerticalScroll)
+        log.mount(Static(message))
+        log.scroll_end()
 
-    def _populate_table(self) -> None:
-        table = self.query_one("#reel-table", DataTable)
-        table.clear()
-        for reel in self.reels:
+    # ------------------------------------------------------------------ queue tab
+
+    def _load_queue(self) -> None:
+        try:
+            tab = self.query_one("#tab-queue")
+        except Exception:
+            return
+        tab.remove_children()
+        tab.mount(Label("Saved reels", classes="card-title"))
+
+        with self.store as store:
+            reels = store.list_reels(limit=200)
+
+        table: DataTable[Any] = DataTable(id="reel-table", zebra_stripes=True, cursor_type="row")
+        for col in ("shortcode", "status", "decision", "score", "category", "caption"):
+            table.add_column(col, key=col)
+
+        for reel in reels:
+            shortcode = str(reel["shortcode"])
+            classification = store.get_classification(shortcode)
+            triage = store.get_triage(shortcode)
             table.add_row(
-                reel.shortcode,
-                str(reel.score),
-                reel.category,
-                reel.status,
-                reel.decision,
-                reel.caption,
-                key=reel.shortcode,
+                shortcode,
+                str(reel["status"]),
+                str((triage or {}).get("decision") or "—"),
+                str((triage or {}).get("value_score") or 0),
+                (classification or {}).get("primary") or "—",
+                str(reel["caption"] or "")[:60],
+                key=shortcode,
             )
-        if self.reels and self.selected_index is None:
-            self.selected_index = 0
-            self._show_details(self.reels[0])
+        tab.mount(table)
 
-    def _refresh_hint(self) -> None:
-        hint = self.query_one("#hint", Static)
-        hint.update(f"{len(self.reels)} reel(s) — filter: {self.filter_value}")
+    # ------------------------------------------------------------------ review tab
 
-    # ------------------------------------------------------------------ selection
+    def _load_review(self) -> None:
+        try:
+            tab = self.query_one("#tab-review")
+        except Exception:
+            return
+        tab.remove_children()
+        tab.mount(Label("Needs review", classes="card-title"))
+
+        button_row = Vertical(classes="button-row")
+        button_row.mount(Button("Approve selected", id="btn-approve", variant="success"))
+        button_row.mount(Button("Reclassify selected", id="btn-reclassify", variant="warning"))
+        button_row.mount(Button("Force decision", id="btn-force", variant="warning"))
+        button_row.mount(Button("Add note", id="btn-note", variant="primary"))
+        button_row.mount(Button("Open URL", id="btn-open", variant="default"))
+        tab.mount(button_row)
+
+        table: DataTable[Any] = DataTable(id="review-table", zebra_stripes=True, cursor_type="row")
+        for col in ("shortcode", "score", "category", "decision", "reason"):
+            table.add_column(col, key=col)
+
+        with self.store as store:
+            reels = store.list_reels(limit=200)
+            for reel in reels:
+                shortcode = str(reel["shortcode"])
+                triage = store.get_triage(shortcode)
+                if not (triage or {}).get("needs_review"):
+                    continue
+                classification = store.get_classification(shortcode)
+                table.add_row(
+                    shortcode,
+                    str((triage or {}).get("value_score") or 0),
+                    (classification or {}).get("primary") or "—",
+                    str((triage or {}).get("decision") or "—"),
+                    str((triage or {}).get("reason") or "")[:60],
+                    key=shortcode,
+                )
+        tab.mount(table)
+
+    # ------------------------------------------------------------------ export tab
+
+    def _load_export(self) -> None:
+        try:
+            tab = self.query_one("#tab-export")
+        except Exception:
+            return
+        tab.remove_children()
+        tab.mount(Label("Export documents", classes="card-title"))
+        formats = ", ".join(SUPPORTED_FORMATS)
+        tab.mount(Label(f"Supported formats: {formats}"))
+        tab.mount(Input(placeholder="Output root (optional)", id="inp-export-out"))
+        tab.mount(Button("Export all formats", id="btn-export", variant="success"))
+        tab.mount(Static(id="export-result"))
+
+    # ------------------------------------------------------------------ config tab
+
+    def _load_config(self) -> None:
+        try:
+            tab = self.query_one("#tab-config")
+        except Exception:
+            return
+        tab.remove_children()
+        tab.mount(Label("Configuration", classes="card-title"))
+        cfg = self.config.redaction_safe_dump()
+        for key, value in cfg.items():
+            tab.mount(Static(f"{key}: {value}"))
+
+    # ------------------------------------------------------------------ doctor tab
+
+    def _load_doctor(self) -> None:
+        try:
+            tab = self.query_one("#tab-doctor")
+        except Exception:
+            return
+        tab.remove_children()
+        tab.mount(Label("Doctor check", classes="card-title"))
+        tab.mount(Button("Run doctor", id="btn-doctor", variant="primary"))
+        tab.mount(Static(id="doctor-result"))
+
+    # ------------------------------------------------------------------ keys
+
+    def on_key(self, event: Key) -> None:
+        key = event.key
+        if key == "q":
+            self.app.exit()
+        elif key == "1":
+            self._push_import()
+        elif key == "2":
+            self._run_pipeline()
+        elif key == "3":
+            tabs = self.query_one("#tabs", TabbedContent)
+            tabs.active = "tab-review"
+        elif key == "4":
+            tabs = self.query_one("#tabs", TabbedContent)
+            tabs.active = "tab-export"
+        elif key == "5":
+            tabs = self.query_one("#tabs", TabbedContent)
+            tabs.active = "tab-config"
+        elif key == "6":
+            tabs = self.query_one("#tabs", TabbedContent)
+            tabs.active = "tab-doctor"
+
+    # ------------------------------------------------------------------ button actions
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id == "btn-run":
+            self._run_pipeline()
+        elif button_id == "btn-import":
+            self._push_import()
+        elif button_id == "btn-export":
+            self._do_export()
+        elif button_id == "btn-doctor":
+            self._do_doctor()
+        elif button_id == "btn-approve":
+            self._do_approve()
+        elif button_id == "btn-reclassify":
+            self._do_reclassify()
+        elif button_id == "btn-force":
+            self._do_force()
+        elif button_id == "btn-note":
+            self._do_note()
+        elif button_id == "btn-open":
+            self._do_open()
+        elif button_id in {"btn-save", "btn-cancel"}:
+            pass  # handled by sub-screens
+
+    # ------------------------------------------------------------------ pipeline
+
+    def _run_pipeline(self) -> None:
+        self._write_log("Starting pipeline run…")
+        try:
+            context = build_context()
+        except Exception as exc:
+            self._write_log(f"[red]config error: {exc}[/red]")
+            return
+        options = RunOptions(limit=None, dry_run=False, depth="adaptive")
+        try:
+            code = run_pipeline(context, options)
+        except DriveUnavailable as exc:
+            self._write_log(f"[red]drive unavailable: {exc}[/red]")
+            return
+        except Exception as exc:
+            self._write_log(f"[red]pipeline error: {exc}[/red]")
+            return
+        self._write_log(f"[green]pipeline finished with exit code {code}[/green]")
+        self._refresh_stats()
+        self._load_queue()
+        self._load_review()
+
+    # ------------------------------------------------------------------ import
+
+    def _push_import(self) -> None:
+        self.app.push_screen(ImportScreen(self.context, self._on_import_done))
+
+    def _on_import_done(self, result: dict[str, Any] | None) -> None:
+        if not result:
+            return
+        self._write_log(f"[green]imported {result.get('reels', 0)} reels[/green]")
+        self._refresh_stats()
+        self._load_queue()
+        self._load_review()
+
+    # ------------------------------------------------------------------ export
+
+    def _do_export(self) -> None:
+        try:
+            out_input = self.query_one("#inp-export-out", Input)
+            out = Path(out_input.value) if out_input.value.strip() else None
+        except Exception:
+            out = None
+        self._write_log("Exporting documents…")
+        try:
+            context = build_context()
+        except Exception as exc:
+            self._write_log(f"[red]config error: {exc}[/red]")
+            return
+        code = export_all(context, formats=",".join(SUPPORTED_FORMATS), out=out)
+        target = out or context.paths.outputs
+        self._write_log(f"[green]export finished (code {code}) → {target}[/green]")
+
+    # ------------------------------------------------------------------ doctor
+
+    def _do_doctor(self) -> None:
+        self._write_log("Running doctor…")
+        try:
+            import shutil
+
+            checks = {
+                "ffmpeg": shutil.which("ffmpeg"),
+                "ffprobe": shutil.which("ffprobe"),
+                "yt-dlp": "yt_dlp",
+                "reportlab": "reportlab",
+                "textual": "textual",
+                "rapidocr": "rapidocr",
+            }
+            from importlib.util import find_spec
+
+            results = []
+            for name, check in checks.items():
+                if isinstance(check, str) and not check.startswith("/"):
+                    ok = find_spec(check) is not None
+                else:
+                    ok = check is not None
+                results.append(f"  {name}: {'ok' if ok else 'missing'}")
+            self._write_log("\n".join(results))
+        except Exception as exc:
+            self._write_log(f"[red]doctor error: {exc}[/red]")
+            return
+        self._write_log("[green]doctor check complete[/green]")
+
+    # ------------------------------------------------------------------ review helpers
+
+    def _selected_shortcode(self, table_id: str) -> str | None:
+        try:
+            table = self.query_one(table_id, DataTable)
+        except Exception:
+            return None
+        row_key = table.cursor_row
+        if row_key is None:
+            return None  # type: ignore[unreachable]
+        try:
+            row_data = table.get_row_at(row_key)
+        except Exception:
+            return None
+        return str(row_data.key)  # type: ignore[attr-defined]
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        row_index = getattr(event, "row_index", None)
-        if row_index is None:
+        """Track the currently selected row key."""
+        self._selected_row_key = str(event.row_key.value)
+
+    def _do_approve(self) -> None:
+        shortcode = self._selected_shortcode("#review-table")
+        if not shortcode:
+            shortcode = getattr(self, "_selected_row_key", None)
+        if not shortcode:
+            self._write_log("[yellow]no reel selected[/yellow]")
             return
-        self.selected_index = row_index
-        self._show_details(self.reels[row_index])
-
-    def _show_details(self, reel: ReelSummary) -> None:
-        scroll = self.query_one("#detail-scroll", VerticalScroll)
-        scroll.remove_children()
-
-        header = self.query_one("#detail-header", Static)
-        header.update(f"Reel: {reel.shortcode}")
-
         with self.store as store:
-            metadata = store.get_metadata(reel.shortcode)
-            transcript = store.get_transcript(reel.shortcode)
-            triage = store.get_triage(reel.shortcode)
-            extraction = store.get_extraction(reel.shortcode)
-            classification = store.get_classification(reel.shortcode)
-            review = store.get_review(reel.shortcode)
-
-        sections: list[tuple[str, str]] = []
-
-        caption = (metadata or {}).get("caption") or reel.caption
-        sections.append(("Caption", caption or "(none)"))
-        sections.append(("URL", reel.url))
-
-        if transcript and transcript.get("text"):
-            text = str(transcript["text"])
-            sections.append(("Transcript", text[:1200] + ("…" if len(text) > 1200 else "")))
-
-        if triage:
-            sections.append(("Triage decision", str(triage.get("decision") or "-")))
-            sections.append(("Triage score", str(triage.get("value_score") or "-")))
-            sections.append(("Triage reason", str(triage.get("reason") or "-")))
-            if triage.get("archive_reason"):
-                sections.append(("Archive reason", str(triage["archive_reason"])))
-            if triage.get("rule_reason"):
-                sections.append(("Rule reason", str(triage["rule_reason"])))
-            if triage.get("needs_review"):
-                sections.append(("Needs review", "yes"))
-
-        if classification:
-            primary = classification.get("primary")
-            secondary = classification.get("secondary") or []
-            sections.append(("Primary category", primary or "-"))
-            if secondary:
-                sections.append(("Secondary categories", ", ".join(secondary)))
-            sections.append(
-                ("Classification confidence", str(classification.get("confidence") or "-"))
-            )
-
-        if extraction:
-            items = extraction.get("items") or []
-            if items:
-                item_lines = [
-                    f"  • {it.get('field', '')}: {it.get('text', '')}" for it in items[:10]
-                ]
-                sections.append(("Extracted items", "\n".join(item_lines)))
-            links = extraction.get("links") or []
-            if links:
-                link_lines = [f"  • {lk.get('url', '')}" for lk in links[:10]]
-                sections.append(("Links", "\n".join(link_lines)))
-
-        if review:
-            notes = review.get("notes")
-            if notes:
-                sections.append(("Notes", str(notes)))
-            overrides = review.get("overrides") or {}
-            if overrides:
-                sections.append(("Overrides", json.dumps(overrides, indent=2)))
-
-        for label, value in sections:
-            scroll.mount(Label(label))
-            scroll.mount(Static(str(value)))
-
-    # ------------------------------------------------------------------ actions
-
-    def action_approve(self) -> None:
-        if self.selected_index is None:
-            return
-        reel = self.reels[self.selected_index]
-        with self.store as store:
-            existing = store.get_review(reel.shortcode) or {}
+            existing = store.get_review(shortcode) or {}
             existing["approved"] = True
-            existing["approved_at"] = datetime.now(UTC).isoformat()
-            store.save_review(reel.shortcode, existing)
-        self.notify(f"Approved {reel.shortcode}")
+            existing["approved_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+            store.save_review(shortcode, existing)
+        self._write_log(f"[green]approved {shortcode}[/green]")
+        self._load_review()
 
-    def action_reclassify(self) -> None:
-        if self.selected_index is None:
+    def _do_reclassify(self) -> None:
+        shortcode = self._selected_shortcode("#review-table")
+        if not shortcode:
+            self._write_log("[yellow]no reel selected[/yellow]")
             return
-        reel = self.reels[self.selected_index]
-        self.app.push_screen(ReclassifyScreen(reel, self.store, self._on_reclassified))
+        self.app.push_screen(ReclassifyScreen(shortcode, self.store, self._on_reclassified))
 
     def _on_reclassified(self, result: dict[str, Any] | None) -> None:
         if not result:
             return
-        self.notify(f"Reclassified: {result.get('primary', '-')}")
-        self._load_reels()
+        self._write_log(
+            f"[green]reclassified {result.get('shortcode')}: {result.get('primary')}[/green]"
+        )
+        self._load_review()
 
-    def action_force(self) -> None:
-        if self.selected_index is None:
+    def _do_force(self) -> None:
+        shortcode = self._selected_shortcode("#review-table")
+        if not shortcode:
+            self._write_log("[yellow]no reel selected[/yellow]")
             return
-        reel = self.reels[self.selected_index]
-        self.app.push_screen(ForceDecisionScreen(reel, self.store, self._on_forced))
+        self.app.push_screen(ForceScreen(shortcode, self.store, self._on_forced))
 
     def _on_forced(self, result: dict[str, Any] | None) -> None:
         if not result:
             return
-        self.notify(f"Decision forced: {result.get('decision', '-')}")
-        self._load_reels()
+        self._write_log(
+            f"[green]forced {result.get('shortcode')} → {result.get('decision')}[/green]"
+        )
+        self._load_review()
 
-    def action_note(self) -> None:
-        if self.selected_index is None:
+    def _do_note(self) -> None:
+        shortcode = self._selected_shortcode("#review-table")
+        if not shortcode:
+            self._write_log("[yellow]no reel selected[/yellow]")
             return
-        reel = self.reels[self.selected_index]
-        self.app.push_screen(NoteScreen(reel, self.store, self._on_note))
+        self.app.push_screen(NoteScreen(shortcode, self.store, self._on_note))
 
     def _on_note(self, result: dict[str, Any] | None) -> None:
         if not result:
             return
-        self.notify("Note saved")
-        self._load_reels()
+        self._write_log(f"[green]note added to {result.get('shortcode')}[/green]")
+        self._load_review()
 
-    def action_open(self) -> None:
-        if self.selected_index is None:
+    def _do_open(self) -> None:
+        shortcode = self._selected_shortcode("#review-table")
+        if not shortcode:
+            self._write_log("[yellow]no reel selected[/yellow]")
             return
-        reel = self.reels[self.selected_index]
-        try:
-            webbrowser.open(reel.url)
-        except Exception as exc:
-            self.notify(f"Cannot open URL: {exc}", severity="error")
-
-    def action_search_focus(self) -> None:
-        self.query_one("#search-input", Input).focus()
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "filter-select":
-            self.filter_value = str(event.value)
-            self.selected_index = None
-            self._apply_filter_and_search()
-            self._populate_table()
-            self._refresh_hint()
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "search-input":
-            self.search_text = event.value
-            self.selected_index = None
-            self._apply_filter_and_search()
-            self._populate_table()
-            self._refresh_hint()
-
-    def action_quit(self) -> None:
-        self.app.exit()
+        with self.store as store:
+            reel = store.get_reel(shortcode)
+        if reel:
+            webbrowser.open(reel["url"])
+            self._write_log(f"[green]opened {reel['url']}[/green]")
 
 
-class ReclassifyScreen(Screen[None]):
-    """Pick primary + secondary categories for one reel."""
+# --------------------------------------------------------------------------- sub screens
+
+
+class ImportScreen(Screen[dict[str, Any] | None]):
+    """Import an Instagram export ZIP or directory."""
 
     CSS = """
     Screen {
         align: center middle;
     }
-    #dialog {
+    #panel {
         width: 60;
-        height: 30;
-        border: solid $primary;
+        height: 22;
+        border: solid #334155;
         padding: 1;
+        background: #1e293b;
         layout: vertical;
     }
     """
 
-    CATEGORIES: tuple[str, ...] = (
+    def __init__(
+        self,
+        context: AppContext,
+        on_done: Callable[[dict[str, Any] | None], None],
+    ) -> None:
+        super().__init__()
+        self.context = context
+        self.on_done = on_done
+
+    def compose(self) -> ComposeResult:
+        yield Label("Import Instagram export", classes="card-title")
+        yield Input(placeholder="Path to ZIP or unpacked export directory", id="inp-path")
+        with Horizontal(classes="button-row"):
+            yield Button("Import", id="btn-import", variant="success")
+            yield Button("Cancel", id="btn-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-cancel":
+            self.app.pop_screen()
+            return
+        path = self.query_one("#inp-path", Input).value.strip()
+        if not path:
+            self.notify("Please enter a path", severity="error")
+            return
+        try:
+            context = build_context()
+        except Exception as exc:
+            self.notify(f"Config error: {exc}", severity="error")
+            return
+        try:
+            report = parse_export(path)
+        except Exception as exc:
+            self.notify(f"Import failed: {exc}", severity="error")
+            return
+        store = Store(context.paths.database)
+        with store:
+            counts = store.import_report(report)
+            for reel in report.reels:
+                reel_paths = context.paths.reel(reel.shortcode).ensure()
+                write_json_atomic(reel_paths.source, reel.model_dump(mode="json"))
+        self.on_done({"reels": counts.get("reels", 0), "posts": counts.get("posts", 0)})
+        self.app.pop_screen()
+
+
+class ReclassifyScreen(Screen[dict[str, Any] | None]):
+    """Reclassify a reel's categories."""
+
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+    #panel {
+        width: 55;
+        height: 18;
+        border: solid #334155;
+        padding: 1;
+        background: #1e293b;
+        layout: vertical;
+    }
+    """
+
+    CATEGORIES = (
         "learning & study tricks",
         "news & information",
         "comedy & funny",
@@ -443,192 +640,164 @@ class ReclassifyScreen(Screen[None]):
 
     def __init__(
         self,
-        reel: ReelSummary,
+        shortcode: str,
         store: Store,
         on_done: Callable[[dict[str, Any] | None], None],
     ) -> None:
         super().__init__()
-        self.reel = reel
+        self.shortcode = shortcode
         self.store = store
         self.on_done = on_done
 
     def compose(self) -> ComposeResult:
-        classification = self.store.get_classification(self.reel.shortcode)
-        current_primary = (classification or {}).get("primary") or ""
-        current_secondary = (classification or {}).get("secondary") or []
-
-        with Vertical(id="dialog"):
-            yield Label(f"Reclassify {self.reel.shortcode}")
-            yield Label("Primary category:")
-            yield Select[str](
-                options=[(c, c) for c in self.CATEGORIES],
-                value=current_primary or "other",
-                id="primary-select",
-            )
-            yield Label("Secondary categories (hold Ctrl to multi-select):")
-            yield Select[str](
-                options=[(c, c) for c in self.CATEGORIES],
-                value=current_secondary[0] if current_secondary else "",
-                allow_blank=True,
-                id="secondary-select",
-            )
-            with Horizontal():
-                yield Button("Save", id="save", variant="primary")
-                yield Button("Cancel", id="cancel")
+        classification = self.store.get_classification(self.shortcode)
+        current = (classification or {}).get("primary") or "other"
+        yield Label(f"Reclassify {self.shortcode}", classes="card-title")
+        yield Label("Primary category:")
+        yield Select[str](
+            options=[(c, c) for c in self.CATEGORIES],
+            value=current,
+            id="sel-primary",
+        )
+        with Horizontal(classes="button-row"):
+            yield Button("Save", id="btn-save", variant="success")
+            yield Button("Cancel", id="btn-cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != "save":
+        if event.button.id == "btn-cancel":
             self.app.pop_screen()
             return
-        primary_select = self.query_one("#primary-select", Select[str])
-        secondary_select = self.query_one("#secondary-select", Select[str])
-        primary_value = primary_select.value
-        secondary_value = secondary_select.value
-        primary: str | None = None if primary_value in (Select.BLANK, "") else str(primary_value)
-        secondary: list[str] = []
-        if secondary_value not in (Select.BLANK, ""):
-            secondary = [str(secondary_value)]
-        result = {"primary": primary, "secondary": secondary}
+        primary = str(self.query_one("#sel-primary", Select[str]).value)
         with self.store as store:
-            existing = store.get_review(self.reel.shortcode) or {}
+            existing = store.get_review(self.shortcode) or {}
             existing["primary"] = primary
-            existing["secondary"] = secondary
-            existing["reclassified_at"] = datetime.now(UTC).isoformat()
-            store.save_review(self.reel.shortcode, existing)
-        self.on_done(result)
+            store.save_review(self.shortcode, existing)
+        self.on_done({"shortcode": self.shortcode, "primary": primary})
         self.app.pop_screen()
 
 
-class ForceDecisionScreen(Screen[None]):
-    """Force a triage decision (archive / extract / stub)."""
+class ForceScreen(Screen[dict[str, Any] | None]):
+    """Force a triage decision."""
 
     CSS = """
     Screen {
         align: center middle;
     }
-    #dialog {
+    #panel {
         width: 50;
-        height: 20;
-        border: solid $primary;
+        height: 16;
+        border: solid #334155;
         padding: 1;
+        background: #1e293b;
         layout: vertical;
     }
     """
 
     def __init__(
         self,
-        reel: ReelSummary,
+        shortcode: str,
         store: Store,
         on_done: Callable[[dict[str, Any] | None], None],
     ) -> None:
         super().__init__()
-        self.reel = reel
+        self.shortcode = shortcode
         self.store = store
         self.on_done = on_done
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            yield Label(f"Force decision for {self.reel.shortcode}")
-            yield Select[str](
-                options=[("archive", "archive"), ("extract", "extract"), ("stub", "stub")],
-                value=self.reel.decision
-                if self.reel.decision in {"archive", "extract", "stub"}
-                else "extract",
-                id="decision-select",
-            )
-            with Horizontal():
-                yield Button("Save", id="save", variant="primary")
-                yield Button("Cancel", id="cancel")
+        triage = self.store.get_triage(self.shortcode) or {}
+        current = str(triage.get("decision") or "extract")
+        yield Label(f"Force decision for {self.shortcode}", classes="card-title")
+        yield Select[str](
+            options=[("extract", "extract"), ("archive", "archive"), ("stub", "stub")],
+            value=current,
+            id="sel-decision",
+        )
+        with Horizontal(classes="button-row"):
+            yield Button("Save", id="btn-save", variant="success")
+            yield Button("Cancel", id="btn-cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != "save":
+        if event.button.id == "btn-cancel":
             self.app.pop_screen()
             return
-        decision_select = self.query_one("#decision-select", Select[str])
-        decision_value = decision_select.value
-        if decision_value in (Select.BLANK, ""):
-            self.app.pop_screen()
-            return
-        decision = str(decision_value)
-        with self.store as store:
-            triage = store.get_triage(self.reel.shortcode) or {}
-            triage["decision"] = decision
-            triage["force_decision"] = decision
-            triage["forced_at"] = datetime.now(UTC).isoformat()
-            store.save_triage(self.reel.shortcode, triage)
-        self.on_done({"decision": decision})
+        decision = str(self.query_one("#sel-decision", Select[str]).value)
+        triage = self.store.get_triage(self.shortcode) or {}
+        triage["decision"] = decision
+        triage["force_decision"] = decision
+        triage["forced_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+        self.store.save_triage(self.shortcode, triage)
+        self.on_done({"shortcode": self.shortcode, "decision": decision})
         self.app.pop_screen()
 
 
-class NoteScreen(Screen[None]):
-    """Add a free-text note to one reel."""
+class NoteScreen(Screen[dict[str, Any] | None]):
+    """Add a note to a reel."""
 
     CSS = """
     Screen {
         align: center middle;
     }
-    #dialog {
-        width: 70;
-        height: 25;
-        border: solid $primary;
+    #panel {
+        width: 60;
+        height: 18;
+        border: solid #334155;
         padding: 1;
+        background: #1e293b;
         layout: vertical;
     }
     """
 
     def __init__(
         self,
-        reel: ReelSummary,
+        shortcode: str,
         store: Store,
         on_done: Callable[[dict[str, Any] | None], None],
     ) -> None:
         super().__init__()
-        self.reel = reel
+        self.shortcode = shortcode
         self.store = store
         self.on_done = on_done
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            yield Label(f"Add note for {self.reel.shortcode}")
-            yield Input(placeholder="Your note…", id="note-input")
-            with Horizontal():
-                yield Button("Save", id="save", variant="primary")
-                yield Button("Cancel", id="cancel")
+        yield Label(f"Add note to {self.shortcode}", classes="card-title")
+        yield Input(placeholder="Your note…", id="inp-note")
+        with Horizontal(classes="button-row"):
+            yield Button("Save", id="btn-save", variant="success")
+            yield Button("Cancel", id="btn-cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != "save":
+        if event.button.id == "btn-cancel":
             self.app.pop_screen()
             return
-        note = self.query_one("#note-input", Input).value.strip()
+        note = self.query_one("#inp-note", Input).value.strip()
+        import datetime as _dt
+
         with self.store as store:
-            existing = store.get_review(self.reel.shortcode) or {}
+            existing = store.get_review(self.shortcode) or {}
             notes = existing.get("notes", [])
             if isinstance(notes, str):
                 notes = [notes]
             notes.append(note)
             existing["notes"] = notes
-            existing["noted_at"] = datetime.now(UTC).isoformat()
-            store.save_review(self.reel.shortcode, existing)
-        self.on_done({"note": note})
+            existing["noted_at"] = _dt.datetime.now(datetime.UTC).isoformat()
+            store.save_review(self.shortcode, existing)
+        self.on_done({"shortcode": self.shortcode, "note": note})
         self.app.pop_screen()
 
 
-class ReviewApp(App[None]):
-    """Top-level Textual application for the review TUI."""
-
-    def __init__(self, context: AppContext) -> None:
-        super().__init__()
-        self.context = context
-
-    def on_mount(self) -> None:
-        self.push_screen(ReviewScreen(self.context))
-
-
-def run_review(context: AppContext) -> int:
-    """Launch the interactive review TUI. Returns 0 on clean exit."""
-    app = ReviewApp(context)
+def run_tui(context: AppContext) -> int:
+    """Launch the full OSINT TUI. Returns 0 on clean exit."""
+    app = OSINTApp(context)
     app.run()
     return 0
 
 
-__all__ = ["ReviewApp", "ReviewScreen", "run_review"]
+def run_tui_app() -> None:
+    """Entry point for the ``OSINT`` console script."""
+    context = build_context()
+    app = OSINTApp(context)
+    app.run()
+
+
+__all__ = ["OSINTApp", "run_tui", "run_tui_app"]

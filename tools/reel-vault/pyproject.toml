@@ -45,6 +45,7 @@ ocr = ["rapidocr>=3.0"]
 
 [project.scripts]
 reel-vault = "reel_vault.cli.main:app"
+OSINT = "reel_vault.review.tui:run_tui_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/reel_vault"]
