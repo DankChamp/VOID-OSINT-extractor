@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from reel_vault.config.loader import load_config
 from reel_vault.importer import ImportReport
 from reel_vault.review.tui import REVIEW_FILTERS, ReelSummary
@@ -75,12 +74,11 @@ def test_reel_summary_dataclass() -> None:
 
 
 def test_tui_loads_reels_from_store(tmp_path: Path) -> None:
-    store, paths, config = _workspace(tmp_path, ["AAA111", "BBB222"])
+    _, _paths, _config = _workspace(tmp_path, ["AAA111", "BBB222"])
+    from reel_vault.cli.context import AppContext
     from reel_vault.review.tui import ReviewScreen
 
-    from reel_vault.cli.context import AppContext
-
-    context = AppContext(config=config, paths=paths)
+    context = AppContext(config=_config, paths=_paths)
     screen = ReviewScreen(context)
     # Access the store through the screen's context
     with screen.store as s:
@@ -91,7 +89,7 @@ def test_tui_loads_reels_from_store(tmp_path: Path) -> None:
 
 
 def test_tui_reel_status_filter(tmp_path: Path) -> None:
-    store, paths, config = _workspace(tmp_path, ["AAA111"])
+    store, _paths, _config = _workspace(tmp_path, ["AAA111"])
     store.set_status("AAA111", ReelStatus.TRIAGE_FAILED)
     with store as s:
         reels = s.list_reels(limit=1000)

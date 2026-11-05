@@ -622,12 +622,41 @@ def run(
     depth: Annotated[
         str, typer.Option("--depth", help="adaptive | light | standard | full.")
     ] = "adaptive",
+    unattended: Annotated[
+        bool,
+        typer.Option("--unattended", help="Overnight mode: no prompts, respect time/cost limits."),
+    ] = False,
+    max_hours: Annotated[
+        float, typer.Option("--max-hours", help="Stop after N hours (0 = unlimited).")
+    ] = 0.0,
+    max_cost_usd: Annotated[
+        float, typer.Option("--max-cost-usd", help="Stop after $N of model cost (0 = unlimited).")
+    ] = 0.0,
+    stop_at: Annotated[
+        str | None, typer.Option("--stop-at", help="Stop at HH:MM (local time).")
+    ] = None,
+    resume: Annotated[
+        bool, typer.Option("--resume", help="Explicit alias for resuming an interrupted run.")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-process reels that reached a terminal state.")
+    ] = False,
 ) -> None:
     """Fetch, transcribe, triage, extract and classify new reels."""
     from reel_vault.pipeline.runner import RunOptions, run_pipeline
 
     context = context_from_typer(ctx)
-    options = RunOptions(limit=limit, dry_run=dry_run, depth=depth)
+    options = RunOptions(
+        limit=limit,
+        dry_run=dry_run,
+        depth=depth,
+        unattended=unattended,
+        max_hours=max_hours,
+        max_cost_usd=max_cost_usd,
+        stop_at=stop_at,
+        resume=resume,
+        force=force,
+    )
     code = run_pipeline(context, options)
     raise typer.Exit(code=code)
 
