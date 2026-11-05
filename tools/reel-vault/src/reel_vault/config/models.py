@@ -54,6 +54,8 @@ class GroqConfig(_Model):
     extraction_model: str = "openai/gpt-oss-120b"
     whisper_model: str = "whisper-large-v3-turbo"
     whisper_cost_per_hour: float = Field(default=0.04, ge=0.0)
+    chat_input_usd_per_million: float = Field(default=0.15, ge=0.0)
+    chat_output_usd_per_million: float = Field(default=0.60, ge=0.0)
     retry_backoff_seconds: float = Field(default=5.0, ge=0.0)
     timeout_seconds: float = 120.0
     max_retries: int = Field(default=4, ge=0, le=10)
@@ -63,6 +65,7 @@ class TriageConfig(_Model):
     extract_threshold: int = Field(default=40, ge=0, le=100)
     needs_review_threshold: int = Field(default=60, ge=0, le=100)
     fallback: FallbackDepth = "standard"
+    max_input_chars: int = Field(default=6000, ge=500, le=50000)
 
 
 class TranscriptionConfig(_Model):

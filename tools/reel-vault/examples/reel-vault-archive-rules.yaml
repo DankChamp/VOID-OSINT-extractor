@@ -1,0 +1,36 @@
+# Copy this file to the workspace root as `reel-vault-archive-rules.yaml`, or point
+# `archive_rules_file` at it. Keywords are triggers, never final decisions: the triage
+# model must confirm the theme before a post is archived.
+confirm_with_llm: true
+
+archive:
+  keywords:
+    - sad
+    - emo
+    - depressed
+    - depression
+    - cuddle
+    - cuddling
+    - love
+    - heartbreak
+    - loneliness
+    - comfort
+    - nostalgia
+  categories:
+    - psychology & mind
+
+extract:
+  tutorial_keywords:
+    - how to
+    - step
+    - trick
+    - hack
+    - tutorial
+    - guide
+    - recipe
+  news_keywords:
+    - breaking
+    - report
+    - study
+    - research
+    - source

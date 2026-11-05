@@ -469,6 +469,83 @@ def transcribe(
         raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
 
 
+# --------------------------------------------------------------------------- triage
+
+
+@app.command()
+def triage(
+    ctx: typer.Context,
+    limit: Annotated[int | None, typer.Option("--limit", help="Triage at most N reels.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-triage finished reels.")] = False,
+    shortcode: Annotated[
+        str | None, typer.Option("--shortcode", help="Triage one specific reel.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print the plan without calling any model.")
+    ] = False,
+    model: Annotated[str | None, typer.Option("--model", help="Override the triage model.")] = None,
+) -> None:
+    """Decide what is worth extracting, archiving or stubbing."""
+    from reel_vault.triage.rules import RuleError
+    from reel_vault.triage.service import TriageService
+
+    context = context_from_typer(ctx)
+    if not dry_run and not os.environ.get(context.config.groq.api_key_env):
+        err_console.print(
+            f"[red]triage unavailable:[/red] {context.config.groq.api_key_env} is not set "
+            "(use --dry-run for a heuristic plan)"
+        )
+        raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
+
+    with context.store() as store:
+        if shortcode is not None and store.get_reel(shortcode) is None:
+            err_console.print(f"[red]unknown shortcode:[/red] {shortcode}")
+            raise typer.Exit(code=EXIT_ERROR)
+        try:
+            service = TriageService(store, context.paths, context.config, model=model)
+        except RuleError as exc:
+            err_console.print(f"[red]archive rules error:[/red] {exc}")
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        summary = service.triage_pending(
+            limit=limit,
+            force=force,
+            shortcodes=[shortcode] if shortcode else None,
+            dry_run=dry_run,
+        )
+
+    if dry_run:
+        table = Table(title="triage plan (dry run, no model calls)")
+        table.add_column("shortcode")
+        table.add_column("decision")
+        table.add_column("score", justify="right")
+        table.add_column("type")
+        table.add_column("fields")
+        table.add_column("reason")
+        for plan in summary.plans:
+            reason = plan.reason if len(plan.reason) <= 70 else plan.reason[:67] + "..."
+            table.add_row(
+                plan.shortcode,
+                plan.decision.value,
+                str(plan.value_score),
+                plan.content_type.value,
+                ", ".join(field.value for field in plan.fields) or "-",
+                reason,
+            )
+        console.print(table)
+
+    console.print(
+        f"[green]triaged[/green] {summary.extracted} extract, "
+        f"{summary.archived} archive, {summary.stubbed} stub, "
+        f"{summary.unavailable} unavailable, {summary.failed} failed"
+    )
+    if summary.cost_usd:
+        console.print(f"  estimated cost: ${summary.cost_usd:.4f}")
+    for code, reason in sorted(summary.failures.items()):
+        console.print(f"  [yellow]{code}[/yellow]: {reason}")
+    if summary.failed and summary.processed == summary.failed:
+        raise typer.Exit(code=EXIT_NOT_IMPLEMENTED)
+
+
 # --------------------------------------------------------------------------- pipeline
 
 
