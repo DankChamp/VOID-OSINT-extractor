@@ -29,10 +29,13 @@ if [ ! -x "$VENV/bin/python" ]; then
     "$PY" -m venv "$VENV"
 fi
 
+# Ensure pip exists in the venv
+"$VENV/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
+
 # Install dependencies
 echo "Installing dependencies (this may take a minute)..."
-"$VENV/bin/pip" install --quiet --upgrade pip
-"$VENV/bin/pip" install --quiet --editable "$TOOL_DIR"
+"$VENV/bin/python" -m pip install --quiet --upgrade pip
+"$VENV/bin/python" -m pip install --quiet --editable "$TOOL_DIR"
 
 echo
 echo "╔══════════════════════════════════════════╗"

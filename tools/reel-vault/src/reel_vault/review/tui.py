@@ -54,7 +54,7 @@ Screen {
 #title {
     dock: top;
     height: 4;
-    background: linear-gradient(90deg, #0f172a, #1e293b);
+    background: #1e293b;
     color: #f8fafc;
     text-style: bold;
     text-align: center;
@@ -87,21 +87,6 @@ Screen {
 .stat-row {
     height: 1;
     color: #cbd5e1;
-    margin: 0 0;
-}
-
-#tabs-container {
-    height: 1fr;
-}
-
-TabbedContent {
-    height: 1fr;
-    background: #050a14;
-}
-
-.tab-pane {
-    height: 1fr;
-    padding: 1;
 }
 
 #log {
@@ -192,6 +177,16 @@ DataTable > .table-row--cursor {
     color: #38bdf8;
 }
 
+TabbedContent {
+    height: 1fr;
+    background: #050a14;
+}
+
+.tab-pane {
+    height: 1fr;
+    padding: 1;
+}
+
 TabbedContent .tab-bar {
     height: 3;
     background: #0f172a;
@@ -244,15 +239,25 @@ class OSINTApp(App[None]):
         self.context = context
         self.paths = context.paths
         self.config = context.config
-        self.store: Store = context.store()
         self._selected_row_key: str | None = None
+
+    def _store(self) -> Store:
+        """Fresh store instance for each operation."""
+        return Store(self.paths.database)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Label("reel-vault", id="title")
         yield Label("Official Instagram export → classified, archived reel library", id="subtitle")
         with Vertical(id="main"):
-            yield self._stats_panel()
+            with Vertical(id="stats"):
+                yield Label("Library stats", classes="card-title")
+                self._stats_total = Label("Total reels: 0")
+                yield self._stats_total
+                self._stats_by_status = Label("By status: —")
+                yield self._stats_by_status
+                self._stats_cost = Label("Estimated cost: $0.0000")
+                yield self._stats_cost
             with TabbedContent(id="tabs-container"):
                 yield TabPane("Queue", id="tab-queue")
                 yield TabPane("Review", id="tab-review")
@@ -262,17 +267,6 @@ class OSINTApp(App[None]):
         yield VerticalScroll(id="log")
         yield Static(KEY_HINT_TEXT, id="action-bar")
         yield Footer()
-
-    def _stats_panel(self) -> Vertical:
-        panel = Vertical(id="stats")
-        panel.mount(Label("Library stats", classes="card-title"))
-        self._stats_total = Label("Total reels: 0")
-        self._stats_by_status = Label("By status: —")
-        self._stats_cost = Label("Estimated cost: $0.0000")
-        panel.mount(self._stats_total)
-        panel.mount(self._stats_by_status)
-        panel.mount(self._stats_cost)
-        return panel
 
     def on_mount(self) -> None:
         self._refresh_stats()
@@ -284,7 +278,7 @@ class OSINTApp(App[None]):
     # ------------------------------------------------------------------ stats
 
     def _refresh_stats(self) -> None:
-        with self.store as store:
+        with self._store() as store:
             stats = store.stats()
         total = stats.get("reels", 0)
         by_status = stats.get("by_status", {})
@@ -308,26 +302,27 @@ class OSINTApp(App[None]):
         tab.remove_children()
         tab.mount(Label("Saved reels", classes="card-title"))
 
-        with self.store as store:
+        with self._store() as store:
             reels = store.list_reels(limit=200)
 
         table: DataTable[Any] = DataTable(id="reel-table", zebra_stripes=True, cursor_type="row")
         for col in ("shortcode", "status", "decision", "score", "category", "caption"):
             table.add_column(col, key=col)
 
-        for reel in reels:
-            shortcode = str(reel["shortcode"])
-            classification = store.get_classification(shortcode)
-            triage = store.get_triage(shortcode)
-            table.add_row(
-                shortcode,
-                str(reel["status"]),
-                str((triage or {}).get("decision") or "—"),
-                str((triage or {}).get("value_score") or 0),
-                (classification or {}).get("primary") or "—",
-                str(reel["caption"] or "")[:60],
-                key=shortcode,
-            )
+        with self._store() as store:
+            for reel in reels:
+                shortcode = str(reel["shortcode"])
+                classification = store.get_classification(shortcode)
+                triage = store.get_triage(shortcode)
+                table.add_row(
+                    shortcode,
+                    str(reel["status"]),
+                    str((triage or {}).get("decision") or "—"),
+                    str((triage or {}).get("value_score") or 0),
+                    (classification or {}).get("primary") or "—",
+                    str(reel["caption"] or "")[:60],
+                    key=shortcode,
+                )
         tab.mount(table)
 
     # ------------------------------------------------------------------ review tab
@@ -341,18 +336,18 @@ class OSINTApp(App[None]):
         tab.mount(Label("Needs review", classes="card-title"))
 
         button_row = Vertical(classes="button-row")
+        tab.mount(button_row)
         button_row.mount(Button("Approve selected", id="btn-approve", variant="success"))
         button_row.mount(Button("Reclassify selected", id="btn-reclassify", variant="warning"))
         button_row.mount(Button("Force decision", id="btn-force", variant="warning"))
         button_row.mount(Button("Add note", id="btn-note", variant="primary"))
         button_row.mount(Button("Open URL", id="btn-open", variant="default"))
-        tab.mount(button_row)
 
         table: DataTable[Any] = DataTable(id="review-table", zebra_stripes=True, cursor_type="row")
         for col in ("shortcode", "score", "category", "decision", "reason"):
             table.add_column(col, key=col)
 
-        with self.store as store:
+        with self._store() as store:
             reels = store.list_reels(limit=200)
             for reel in reels:
                 shortcode = str(reel["shortcode"])
@@ -569,7 +564,7 @@ class OSINTApp(App[None]):
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
-        with self.store as store:
+        with self._store() as store:
             existing = store.get_review(shortcode) or {}
             existing["approved"] = True
             existing["approved_at"] = datetime.datetime.now(datetime.UTC).isoformat()
@@ -582,7 +577,7 @@ class OSINTApp(App[None]):
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
-        self.app.push_screen(ReclassifyScreen(shortcode, self.store, self._on_reclassified))
+        self.app.push_screen(ReclassifyScreen(shortcode, self._store(), self._on_reclassified))
 
     def _on_reclassified(self, result: dict[str, Any] | None) -> None:
         if not result:
@@ -597,7 +592,7 @@ class OSINTApp(App[None]):
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
-        self.app.push_screen(ForceScreen(shortcode, self.store, self._on_forced))
+        self.app.push_screen(ForceScreen(shortcode, self._store(), self._on_forced))
 
     def _on_forced(self, result: dict[str, Any] | None) -> None:
         if not result:
@@ -612,7 +607,7 @@ class OSINTApp(App[None]):
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
-        self.app.push_screen(NoteScreen(shortcode, self.store, self._on_note))
+        self.app.push_screen(NoteScreen(shortcode, self._store(), self._on_note))
 
     def _on_note(self, result: dict[str, Any] | None) -> None:
         if not result:
@@ -625,7 +620,7 @@ class OSINTApp(App[None]):
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
-        with self.store as store:
+        with self._store() as store:
             reel = store.get_reel(shortcode)
         if reel:
             webbrowser.open(reel["url"])
@@ -760,10 +755,10 @@ class ReclassifyScreen(Screen[dict[str, Any] | None]):
             self.app.pop_screen()
             return
         primary = str(self.query_one("#sel-primary", Select[str]).value)
-        with self.store as store:
-            existing = store.get_review(self.shortcode) or {}
-            existing["primary"] = primary
-            store.save_review(self.shortcode, existing)
+        self.store.save_review(
+            self.shortcode,
+            {"primary": primary},
+        )
         self.on_done({"shortcode": self.shortcode, "primary": primary})
         self.app.pop_screen()
 
@@ -865,15 +860,13 @@ class NoteScreen(Screen[dict[str, Any] | None]):
         note = self.query_one("#inp-note", Input).value.strip()
         import datetime as _dt
 
-        with self.store as store:
-            existing = store.get_review(self.shortcode) or {}
-            notes = existing.get("notes", [])
-            if isinstance(notes, str):
-                notes = [notes]
-            notes.append(note)
-            existing["notes"] = notes
-            existing["noted_at"] = _dt.datetime.now(datetime.UTC).isoformat()
-            store.save_review(self.shortcode, existing)
+        self.store.save_review(
+            self.shortcode,
+            {
+                "notes": [note],
+                "noted_at": _dt.datetime.now(datetime.UTC).isoformat(),
+            },
+        )
         self.on_done({"shortcode": self.shortcode, "note": note})
         self.app.pop_screen()
 

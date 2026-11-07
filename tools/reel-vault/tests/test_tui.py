@@ -56,7 +56,6 @@ def test_tui_app_instantiates(tmp_path: Path) -> None:
     assert _app is not None
     assert _app.paths == paths
     assert _app.config == config
-    assert isinstance(_app.store, Store)
 
 
 def test_tui_loads_reels_from_store(tmp_path: Path) -> None:
