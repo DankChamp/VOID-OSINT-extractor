@@ -1,7 +1,7 @@
 # reel-vault — OSINT Archive
 
 Official Instagram export → classified, archived reel library. Everything runs
-offline on your machine; no login, password, or private API.
+offline on your machine; no login, password, session cookies, or private API.
 
 ## Install from local files
 
@@ -9,17 +9,17 @@ offline on your machine; no login, password, or private API.
 # From the workspace root:
 ./install.sh
 
-# Activate the venv, then run:
+# Activate the venv, then run the OSINT TUI:
 source .venv/bin/activate
 OSINT
+
+# Or run directly without activating:
+.venv/bin/OSINT
 ```
 
-The `OSINT` command launches the full-screen TUI. After installation you can also
-run it directly: `.venv/bin/OSINT`.
+## The OSINT TUI
 
-## TUI — the ``OSINT`` app
-
-A single Textual interface covers every pipeline stage:
+A single full-screen interface covers every pipeline stage:
 
 | Key | Screen | What it does |
 |-----|--------|--------------|
@@ -62,4 +62,6 @@ Exit codes: 0=done, 1=error, 2=bad request, 3=provider unavailable, 4=drive lost
 
 ## Requirements
 
-Python 3.11+, ffmpeg, ffprobe, Groq API key (`GROQ_API_KEY` env var).
+- Python 3.11+
+- ffmpeg, ffprobe (for media/audio)
+- Groq API key (`GROQ_API_KEY` environment variable) for AI features

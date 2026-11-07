@@ -3,7 +3,7 @@
 A single Textual application that covers every stage of the pipeline:
 
 * Import an official Instagram export
-* Run fetch / transcribe / triage / extract / classify / media
+* Run fetch → transcribe → triage → extract → classify → media
 * Review and correct reels (approve, reclassify, force decision, add note, open URL)
 * Export documents (Markdown, JSON, PDF, Obsidian)
 * Inspect configuration and run the doctor check
@@ -47,13 +47,14 @@ from reel_vault.storage.io import write_json_atomic
 APP_CSS = """
 Screen {
     layout: vertical;
-    background: #0f172a;
+    background: #050a14;
+    color: #e2e8f0;
 }
 
 #title {
     dock: top;
-    height: 3;
-    background: #1e293b;
+    height: 4;
+    background: linear-gradient(90deg, #0f172a, #1e293b);
     color: #f8fafc;
     text-style: bold;
     text-align: center;
@@ -64,9 +65,10 @@ Screen {
 #subtitle {
     dock: top;
     height: 1;
-    background: #0f172a;
-    color: #64748b;
+    background: #050a14;
+    color: #94a3b8;
     text-align: center;
+    text-style: italic;
 }
 
 #main {
@@ -75,39 +77,26 @@ Screen {
 }
 
 #stats {
-    height: 8;
+    height: 7;
     border: solid #334155;
     margin: 0 1;
     padding: 1;
-    background: #1e293b;
+    background: #0f172a;
 }
 
 .stat-row {
     height: 1;
     color: #cbd5e1;
+    margin: 0 0;
 }
 
-#log {
+#tabs-container {
     height: 1fr;
-    border: solid #334155;
-    margin: 0 1;
-    padding: 1;
-    background: #0f172a;
-    color: #cbd5e1;
-    overflow-y: auto;
-}
-
-#action-bar {
-    dock: bottom;
-    height: 3;
-    background: #1e293b;
-    color: #cbd5e1;
-    padding: 0 2;
-    text-align: center;
 }
 
 TabbedContent {
     height: 1fr;
+    background: #050a14;
 }
 
 .tab-pane {
@@ -115,23 +104,126 @@ TabbedContent {
     padding: 1;
 }
 
+#log {
+    dock: bottom;
+    height: 12;
+    border: solid #334155;
+    margin: 0 1;
+    padding: 1;
+    background: #020617;
+    color: #94a3b8;
+    overflow-y: auto;
+}
+
+#action-bar {
+    dock: bottom;
+    height: 3;
+    background: #0f172a;
+    color: #cbd5e1;
+    padding: 0 2;
+    text-align: center;
+}
+
 .dialog {
     align: center middle;
 }
 
 .dialog #panel {
-    width: 60;
-    height: 18;
-    border: solid #334155;
+    width: 70;
+    height: auto;
+    min-height: 14;
+    border: thick #38bdf8;
     padding: 1;
-    background: #1e293b;
+    background: #0f172a;
     layout: vertical;
+}
+
+.dialog-title {
+    text-style: bold;
+    color: #38bdf8;
+    text-align: center;
+    margin-bottom: 1;
 }
 
 .button-row {
     height: 3;
     margin: 1 0;
     align: center middle;
+}
+
+.button-row Button {
+    margin: 0 1;
+}
+
+.card-title {
+    text-style: bold;
+    color: #f8fafc;
+    margin-bottom: 1;
+}
+
+.status-ok {
+    color: #22c55e;
+}
+
+.status-warn {
+    color: #eab308;
+}
+
+.status-error {
+    color: #ef4444;
+}
+
+#reel-table, #review-table {
+    background: #0f172a;
+}
+
+DataTable > .table-header {
+    background: #1e293b;
+    color: #94a3b8;
+    text-style: bold;
+}
+
+DataTable > .table-row {
+    background: #0f172a;
+}
+
+DataTable > .table-row--cursor {
+    background: #1e293b;
+    color: #38bdf8;
+}
+
+TabbedContent .tab-bar {
+    height: 3;
+    background: #0f172a;
+}
+
+TabbedContent .tab-bar .tab--active {
+    background: #38bdf8;
+    color: #050a14;
+    text-style: bold;
+}
+
+TabbedContent .tab-bar .tab--inactive {
+    background: #050a14;
+    color: #64748b;
+}
+
+Input {
+    background: #020617;
+    border: solid #334155;
+    color: #f8fafc;
+    margin: 0 0;
+}
+
+Select {
+    background: #020617;
+    border: solid #334155;
+    color: #f8fafc;
+    margin: 0 0;
+}
+
+Static {
+    margin: 0 0;
 }
 """
 
@@ -161,13 +253,13 @@ class OSINTApp(App[None]):
         yield Label("Official Instagram export → classified, archived reel library", id="subtitle")
         with Vertical(id="main"):
             yield self._stats_panel()
-            yield TabbedContent(id="tabs")
-            yield TabPane("Queue", id="tab-queue")
-            yield TabPane("Review", id="tab-review")
-            yield TabPane("Export", id="tab-export")
-            yield TabPane("Config", id="tab-config")
-            yield TabPane("Doctor", id="tab-doctor")
-            yield VerticalScroll(id="log")
+            with TabbedContent(id="tabs-container"):
+                yield TabPane("Queue", id="tab-queue")
+                yield TabPane("Review", id="tab-review")
+                yield TabPane("Export", id="tab-export")
+                yield TabPane("Config", id="tab-config")
+                yield TabPane("Doctor", id="tab-doctor")
+        yield VerticalScroll(id="log")
         yield Static(KEY_HINT_TEXT, id="action-bar")
         yield Footer()
 
@@ -329,16 +421,16 @@ class OSINTApp(App[None]):
         elif key == "2":
             self._run_pipeline()
         elif key == "3":
-            tabs = self.query_one("#tabs", TabbedContent)
+            tabs = self.query_one("#tabs-container", TabbedContent)
             tabs.active = "tab-review"
         elif key == "4":
-            tabs = self.query_one("#tabs", TabbedContent)
+            tabs = self.query_one("#tabs-container", TabbedContent)
             tabs.active = "tab-export"
         elif key == "5":
-            tabs = self.query_one("#tabs", TabbedContent)
+            tabs = self.query_one("#tabs-container", TabbedContent)
             tabs.active = "tab-config"
         elif key == "6":
-            tabs = self.query_one("#tabs", TabbedContent)
+            tabs = self.query_one("#tabs-container", TabbedContent)
             tabs.active = "tab-doctor"
 
     # ------------------------------------------------------------------ button actions
@@ -457,14 +549,14 @@ class OSINTApp(App[None]):
             table = self.query_one(table_id, DataTable)
         except Exception:
             return None
-        row_key = table.cursor_row
-        if row_key is None:
-            return None  # type: ignore[unreachable]
+        cursor = table.cursor_row
+        if cursor < 0:
+            return None
         try:
-            row_data = table.get_row_at(row_key)
+            row = table.get_row_at(cursor)
         except Exception:
             return None
-        return str(row_data.key)  # type: ignore[attr-defined]
+        return str(row[0]) if row else None
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Track the currently selected row key."""
@@ -551,11 +643,11 @@ class ImportScreen(Screen[dict[str, Any] | None]):
         align: center middle;
     }
     #panel {
-        width: 60;
-        height: 22;
-        border: solid #334155;
+        width: 70;
+        height: 20;
+        border: thick #38bdf8;
         padding: 1;
-        background: #1e293b;
+        background: #0f172a;
         layout: vertical;
     }
     """
@@ -570,7 +662,7 @@ class ImportScreen(Screen[dict[str, Any] | None]):
         self.on_done = on_done
 
     def compose(self) -> ComposeResult:
-        yield Label("Import Instagram export", classes="card-title")
+        yield Label("Import Instagram export", classes="dialog-title")
         yield Input(placeholder="Path to ZIP or unpacked export directory", id="inp-path")
         with Horizontal(classes="button-row"):
             yield Button("Import", id="btn-import", variant="success")
@@ -612,11 +704,11 @@ class ReclassifyScreen(Screen[dict[str, Any] | None]):
         align: center middle;
     }
     #panel {
-        width: 55;
-        height: 18;
-        border: solid #334155;
+        width: 60;
+        height: 16;
+        border: thick #38bdf8;
         padding: 1;
-        background: #1e293b;
+        background: #0f172a;
         layout: vertical;
     }
     """
@@ -652,7 +744,7 @@ class ReclassifyScreen(Screen[dict[str, Any] | None]):
     def compose(self) -> ComposeResult:
         classification = self.store.get_classification(self.shortcode)
         current = (classification or {}).get("primary") or "other"
-        yield Label(f"Reclassify {self.shortcode}", classes="card-title")
+        yield Label(f"Reclassify {self.shortcode}", classes="dialog-title")
         yield Label("Primary category:")
         yield Select[str](
             options=[(c, c) for c in self.CATEGORIES],
@@ -684,11 +776,11 @@ class ForceScreen(Screen[dict[str, Any] | None]):
         align: center middle;
     }
     #panel {
-        width: 50;
-        height: 16;
-        border: solid #334155;
+        width: 55;
+        height: 14;
+        border: thick #38bdf8;
         padding: 1;
-        background: #1e293b;
+        background: #0f172a;
         layout: vertical;
     }
     """
@@ -707,7 +799,7 @@ class ForceScreen(Screen[dict[str, Any] | None]):
     def compose(self) -> ComposeResult:
         triage = self.store.get_triage(self.shortcode) or {}
         current = str(triage.get("decision") or "extract")
-        yield Label(f"Force decision for {self.shortcode}", classes="card-title")
+        yield Label(f"Force decision for {self.shortcode}", classes="dialog-title")
         yield Select[str](
             options=[("extract", "extract"), ("archive", "archive"), ("stub", "stub")],
             value=current,
@@ -739,11 +831,11 @@ class NoteScreen(Screen[dict[str, Any] | None]):
         align: center middle;
     }
     #panel {
-        width: 60;
-        height: 18;
-        border: solid #334155;
+        width: 70;
+        height: 16;
+        border: thick #38bdf8;
         padding: 1;
-        background: #1e293b;
+        background: #0f172a;
         layout: vertical;
     }
     """
@@ -760,7 +852,7 @@ class NoteScreen(Screen[dict[str, Any] | None]):
         self.on_done = on_done
 
     def compose(self) -> ComposeResult:
-        yield Label(f"Add note to {self.shortcode}", classes="card-title")
+        yield Label(f"Add note to {self.shortcode}", classes="dialog-title")
         yield Input(placeholder="Your note…", id="inp-note")
         with Horizontal(classes="button-row"):
             yield Button("Save", id="btn-save", variant="success")
