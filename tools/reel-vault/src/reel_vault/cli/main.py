@@ -207,15 +207,16 @@ def import_export(
         raise typer.Exit(code=EXIT_ERROR) from exc
 
     with context.store() as store:
-        counts = store.import_report(report)
+        counts = store.import_report(report, skip_existing=True)
 
     for reel in report.reels:
-        reel_paths = context.paths.reel(reel.shortcode).ensure()
-        write_json_atomic(reel_paths.source, reel.model_dump(mode="json"))
+        if store.get_reel(reel.shortcode) is not None:
+            reel_paths = context.paths.reel(reel.shortcode).ensure()
+            write_json_atomic(reel_paths.source, reel.model_dump(mode="json"))
 
     console.print(
-        f"[green]imported[/green] {counts['reels']} reels, {counts['posts']} posts, "
-        f"{counts['collections']} collections"
+        f"[green]imported[/green] {counts['reels']} reels, "
+        f"{counts.get('skipped', 0)} skipped (already imported)"
     )
     if report.warnings:
         console.print(f"[yellow]{len(report.warnings)} warning(s)[/yellow]")

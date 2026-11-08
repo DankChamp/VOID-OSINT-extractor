@@ -162,8 +162,20 @@ class Store:
 
     # ---------------------------------------------------------------- imports and reels
 
-    def import_report(self, report: ImportReport) -> dict[str, int]:
+    def get_existing_shortcodes(self) -> set[str]:
+        """Return the set of shortcodes already in the database."""
+        rows = self._conn.execute("SELECT shortcode FROM reels").fetchall()
+        return {row["shortcode"] for row in rows}
+
+    def import_report(self, report: ImportReport, *, skip_existing: bool = True) -> dict[str, int]:
         now = iso_now()
+        reels = list(report.reels)
+        skipped = 0
+        if skip_existing:
+            existing = self.get_existing_shortcodes()
+            new_reels = [r for r in reels if r.shortcode not in existing]
+            skipped = len(reels) - len(new_reels)
+            reels = new_reels
         with self._conn:
             self._conn.execute(
                 "INSERT INTO imports(source, imported_at, counts, warnings) VALUES(?, ?, ?, ?)",
@@ -174,9 +186,13 @@ class Store:
                     json.dumps(report.warnings),
                 ),
             )
-            for reel in report.reels:
+            for reel in reels:
                 self._upsert_reel(reel, now)
-        return report.counts
+        counts = dict(report.counts)
+        counts["reels"] = len(reels)
+        counts["posts"] = len(reels)
+        counts["skipped"] = skipped
+        return counts
 
     def _upsert_reel(self, reel: SourceReel, now: str) -> None:
         row = self._conn.execute(

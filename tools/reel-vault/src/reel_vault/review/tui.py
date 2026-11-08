@@ -241,6 +241,7 @@ class OSINTApp(App[None]):
         self.config = context.config
         self._selected_row_key: str | None = None
         self._review_table: DataTable[Any] | None = None
+        self._queue_table: DataTable[Any] | None = None
 
     def _store(self) -> Store:
         """Fresh store instance for each operation."""
@@ -325,6 +326,7 @@ class OSINTApp(App[None]):
                     key=shortcode,
                 )
         tab.mount(table)
+        self._queue_table = table
 
     # ------------------------------------------------------------------ review tab
 
@@ -486,7 +488,10 @@ class OSINTApp(App[None]):
     def _on_import_done(self, result: dict[str, Any] | None) -> None:
         if not result:
             return
-        self._write_log(f"[green]imported {result.get('reels', 0)} reels[/green]")
+        self._write_log(
+            f"[green]imported {result.get('reels', 0)} reels, "
+            f"{result.get('skipped', 0)} skipped (already imported)[/green]"
+        )
         self._refresh_stats()
         self._load_queue()
         self._load_review()
@@ -542,17 +547,19 @@ class OSINTApp(App[None]):
     # ------------------------------------------------------------------ review helpers
 
     def _selected_shortcode(self) -> str | None:
-        table = self._review_table
-        if table is None:
-            return None
-        cursor = table.cursor_row
-        if cursor < 0:
-            return None
-        try:
-            row = table.get_row_at(cursor)
-        except Exception:
-            return None
-        return str(row[0]) if row else None
+        # Check both tables; the active one has cursor_row >= 0
+        for table in (self._review_table, self._queue_table):
+            if table is None:
+                continue
+            cursor = table.cursor_row
+            if cursor < 0:
+                continue
+            try:
+                row = table.get_row_at(cursor)
+            except Exception:
+                continue
+            return str(row[0]) if row else None
+        return None
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Track the currently selected row key."""
@@ -684,11 +691,19 @@ class ImportScreen(Screen[dict[str, Any] | None]):
             return
         store = Store(context.paths.database)
         with store:
-            counts = store.import_report(report)
+            counts = store.import_report(report, skip_existing=True)
             for reel in report.reels:
-                reel_paths = context.paths.reel(reel.shortcode).ensure()
-                write_json_atomic(reel_paths.source, reel.model_dump(mode="json"))
-        self.on_done({"reels": counts.get("reels", 0), "posts": counts.get("posts", 0)})
+                if store.get_reel(reel.shortcode) is not None:
+                    # Only write source.json for new/updated reels
+                    reel_paths = context.paths.reel(reel.shortcode).ensure()
+                    write_json_atomic(reel_paths.source, reel.model_dump(mode="json"))
+        self.on_done(
+            {
+                "reels": counts.get("reels", 0),
+                "posts": counts.get("posts", 0),
+                "skipped": counts.get("skipped", 0),
+            }
+        )
         self.app.pop_screen()
 
 
