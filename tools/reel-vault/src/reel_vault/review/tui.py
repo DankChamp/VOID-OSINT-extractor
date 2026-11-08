@@ -240,6 +240,7 @@ class OSINTApp(App[None]):
         self.paths = context.paths
         self.config = context.config
         self._selected_row_key: str | None = None
+        self._review_table: DataTable[Any] | None = None
 
     def _store(self) -> Store:
         """Fresh store instance for each operation."""
@@ -305,7 +306,7 @@ class OSINTApp(App[None]):
         with self._store() as store:
             reels = store.list_reels(limit=200)
 
-        table: DataTable[Any] = DataTable(id="reel-table", zebra_stripes=True, cursor_type="row")
+        table: DataTable[Any] = DataTable(zebra_stripes=True, cursor_type="row")
         for col in ("shortcode", "status", "decision", "score", "category", "caption"):
             table.add_column(col, key=col)
 
@@ -343,7 +344,7 @@ class OSINTApp(App[None]):
         button_row.mount(Button("Add note", id="btn-note", variant="primary"))
         button_row.mount(Button("Open URL", id="btn-open", variant="default"))
 
-        table: DataTable[Any] = DataTable(id="review-table", zebra_stripes=True, cursor_type="row")
+        table: DataTable[Any] = DataTable(zebra_stripes=True, cursor_type="row")
         for col in ("shortcode", "score", "category", "decision", "reason"):
             table.add_column(col, key=col)
 
@@ -364,6 +365,7 @@ class OSINTApp(App[None]):
                     key=shortcode,
                 )
         tab.mount(table)
+        self._review_table = table
 
     # ------------------------------------------------------------------ export tab
 
@@ -539,10 +541,9 @@ class OSINTApp(App[None]):
 
     # ------------------------------------------------------------------ review helpers
 
-    def _selected_shortcode(self, table_id: str) -> str | None:
-        try:
-            table = self.query_one(table_id, DataTable)
-        except Exception:
+    def _selected_shortcode(self) -> str | None:
+        table = self._review_table
+        if table is None:
             return None
         cursor = table.cursor_row
         if cursor < 0:
@@ -558,7 +559,7 @@ class OSINTApp(App[None]):
         self._selected_row_key = str(event.row_key.value)
 
     def _do_approve(self) -> None:
-        shortcode = self._selected_shortcode("#review-table")
+        shortcode = self._selected_shortcode()
         if not shortcode:
             shortcode = getattr(self, "_selected_row_key", None)
         if not shortcode:
@@ -573,7 +574,7 @@ class OSINTApp(App[None]):
         self._load_review()
 
     def _do_reclassify(self) -> None:
-        shortcode = self._selected_shortcode("#review-table")
+        shortcode = self._selected_shortcode()
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
@@ -588,7 +589,7 @@ class OSINTApp(App[None]):
         self._load_review()
 
     def _do_force(self) -> None:
-        shortcode = self._selected_shortcode("#review-table")
+        shortcode = self._selected_shortcode()
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
@@ -603,7 +604,7 @@ class OSINTApp(App[None]):
         self._load_review()
 
     def _do_note(self) -> None:
-        shortcode = self._selected_shortcode("#review-table")
+        shortcode = self._selected_shortcode()
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
@@ -616,7 +617,7 @@ class OSINTApp(App[None]):
         self._load_review()
 
     def _do_open(self) -> None:
-        shortcode = self._selected_shortcode("#review-table")
+        shortcode = self._selected_shortcode()
         if not shortcode:
             self._write_log("[yellow]no reel selected[/yellow]")
             return
